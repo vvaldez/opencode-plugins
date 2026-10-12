@@ -13,12 +13,20 @@ columns. ~15 lines. See [packages/version-footer](packages/version-footer).
 
 ### dials — `packages/dials`
 
-Ambient status segments for the footer: vault lock state (`bw`), VPN
-reachability, CI pipeline (GitHub Actions via `gh`, GitLab via `glab`),
-and the current branch's MR state. Data comes from local CLIs the user
-already authenticated — the plugin holds no credentials. Per-widget
-surface config (footer | panel | both | off), `/dials` to configure,
+Ambient status segments for the footer: vault lock state (`bw`), network
+reachability (https probe against a configurable endpoint), CI pipeline
+(GitHub Actions via `gh`, GitLab via `glab`), and the current branch's MR
+state. Data comes from local CLIs the user already authenticated — the
+plugin holds no credentials. Per-widget surface config (footer | off),
+`/dials` to configure (surface, enable, refresh, endpoint, reset),
 `/dials-refresh` to re-check. See [packages/dials](packages/dials).
+
+**Trust boundary.** `opencode.json` can be project-scoped, so options are
+display-only (`enabled`, `surface`, clamped `interval`) — a hostile repo
+cannot seed commands or fetch targets. Every check runs a fixed argv
+assembled in code; there is no shell and no string interpolation. The
+endpoint is dialog-only and https-validated, with a reset action. Pure
+helpers have a unit-test target (`bun test packages/dials/test/`).
 
 ## Trust posture
 

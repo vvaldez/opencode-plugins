@@ -1,4 +1,4 @@
-# opencode-version-plugin
+# @vvaldez/opencode-version-footer
 
 Small OpenCode TUI (CLI) plugin that shows the harness version in the
 in-session footer status row (`prompt.footer.status`) — e.g. `v2.0.27`.
@@ -19,16 +19,19 @@ rendering `context.app.version`. Read `tui.tsx`; that is the whole plugin.
 - `tui.tsx` — the TUI plugin: appends a version slot to `prompt.footer.status`
 - `index.ts` — main plugin stub (`./` export; required for package loading)
 - `package.json` — package metadata; `./tui` export, OpenTUI peers
-- `research/prior-art.md` — prior-art research (2026-10-12)
+
+Prior-art research lives at the repo root: `research/prior-art.md`.
 
 ## Loading (local)
 
-Clone the repo anywhere, then point `cli.json` at the clone path:
+This package lives inside the [plugin collection](../../README.md). Clone
+the collection repo anywhere, then point `cli.json` at the **package
+directory** — the repo root is a workspaces manifest and loads nothing:
 
 ```json
 {
   "plugins": [
-    "/path/to/opencode-plugins"
+    "/path/to/opencode-plugins/packages/version-footer"
   ]
 }
 ```
