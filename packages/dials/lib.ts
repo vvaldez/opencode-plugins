@@ -38,7 +38,7 @@ export type DialState = {
 export type DialsConfig = { widgets: Record<WidgetId, WidgetConfig> }
 
 export const GLYPH: Record<DialStatus, string> = { ok: "✓", warn: "!", fail: "✗", unknown: "?" }
-export const LABEL: Record<WidgetId, string> = { vault: "bw", vpn: "net", ci: "ci", mr: "mr" }
+export const LABEL: Record<WidgetId, string> = { vault: "bw", vpn: "vpn", ci: "ci", mr: "mr" }
 export const WIDGETS: WidgetId[] = ["vault", "vpn", "ci", "mr"]
 export const SURFACES: Surface[] = ["footer", "off"]
 export const MIN_INTERVAL = 10_000

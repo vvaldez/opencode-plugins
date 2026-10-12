@@ -345,11 +345,11 @@ export default Plugin.define({
             onTrigger: (id) => {
               const widget = id as WidgetId
               if (widget !== "vpn") {
-                context.ui.toast.show({ message: "endpoint applies to net only" })
+                context.ui.toast.show({ message: "endpoint applies to vpn only" })
                 return
               }
               void (async () => {
-                const answer = await context.ui.dialog.prompt({ title: "net endpoint", placeholder: "https://github.com" })
+                const answer = await context.ui.dialog.prompt({ title: "vpn endpoint", placeholder: "https://github.com" })
                 if (!answer) return
                 const url = answer.trim()
                 if (!url.startsWith("https://")) {
@@ -360,7 +360,7 @@ export default Plugin.define({
                   draft.widgets.vpn.endpoint = url
                 })
                 void checkOne("vpn")
-                context.ui.toast.show({ message: "net endpoint set", variant: "success" })
+                context.ui.toast.show({ message: "vpn endpoint set", variant: "success" })
               })()
             },
           },
