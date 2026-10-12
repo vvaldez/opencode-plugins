@@ -1,5 +1,5 @@
 {
-  "name": "opencode-version-plugin",
+  "name": "@vvaldez/opencode-version-footer",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

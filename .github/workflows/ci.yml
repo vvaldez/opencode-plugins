@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: JSON validity
-        run: python3 -c "import json; json.load(open('package.json')); json.load(open('package-lock.json')); print('json valid')"
+        run: python3 -c "import glob, json; files = glob.glob('package.json') + glob.glob('packages/*/package.json'); [json.load(open(f)) for f in files]; print(f'json valid ({len(files)} files)')"
       - name: Secret scan
         run: |
           if grep -rInE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9-]{20,})' --exclude-dir=.git .; then
