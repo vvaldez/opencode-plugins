@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin/tui"
 
 export default Plugin.define({
-  id: "vvaldez.version",
+  id: "vvaldez.version.tui",
   setup(context) {
     // Show the harness version in the in-session footer status row
     // (the home footer already renders a version; the prompt footer does not).

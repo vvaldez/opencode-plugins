@@ -1,0 +1,21 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JSON validity
+        run: python3 -c "import json; json.load(open('package.json')); json.load(open('package-lock.json')); print('json valid')"
+      - name: Secret scan
+        run: |
+          if grep -rInE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9-]{20,})' --exclude-dir=.git .; then
+            echo "FAIL: credential-shaped string in repo"
+            exit 1
+          fi
+          echo "no credential-shaped strings"
+      # No typecheck job: OpenTUI peers are host-resolved at runtime, so tsc
+      # cannot run against them in CI. Runtime behavior is verified manually
+      # (pty-rendered TUI) per the README.
