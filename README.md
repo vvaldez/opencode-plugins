@@ -22,7 +22,12 @@ pipeline (GitHub Actions via `gh`, GitLab via `glab`), and the current
 branch's MR state. Data comes from local CLIs the user already
 authenticated — the plugin holds no credentials. Per-widget surface
 config (footer | off), `/dials` to configure (surface, enable, refresh,
-endpoint, reset), `/dials-refresh` to re-check. See
+endpoint, reset), `/dials-refresh` to re-check. The ci and mr widgets
+have detail views: select one in `/dials` and press ctrl+d to open a
+session panel — recent runs for the branch (ci) or the branch's current
+MR state (mr); escape closes. Detail data is fetched on demand, and a
+CLI failure is stated explicitly ("failed to load runs: …") rather than
+reading as a false "none". See
 [packages/dials](packages/dials).
 
 **Trust boundary.** `opencode.json` can be project-scoped, so options are
