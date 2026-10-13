@@ -128,6 +128,12 @@ describe("classifyCi (github)", () => {
   test("malformed output", () => {
     expect(classifyCi("github", "not json").detail).toBe("parse")
   })
+  test("ansi escapes in displayTitle are sanitized", () => {
+    // gh serializes control chars escaped (\u001b) — as it would in real output
+    const r = classifyCi("github", `[{"status":"completed","conclusion":"success","displayTitle":"\\u001b[31mfailed\\u001b[0m"}]`)
+    expect(r.status).toBe("ok")
+    expect(r.detail).toBe("failed")
+  })
 })
 
 describe("classifyCi (gitlab)", () => {
@@ -141,6 +147,9 @@ describe("classifyCi (gitlab)", () => {
   })
   test("running", () => {
     expect(classifyCi("gitlab", `[{"status":"running","ref":"main"}]`).status).toBe("warn")
+  })
+  test("pending", () => {
+    expect(classifyCi("gitlab", `[{"status":"pending","ref":"main"}]`).status).toBe("warn")
   })
   test("no pipelines", () => {
     expect(classifyCi("gitlab", `[]`).status).toBe("unknown")
@@ -161,10 +170,6 @@ describe("classifyMr (github)", () => {
     const r = classifyMr("github", `{"state":"merged","number":42}`)
     expect(r.status).toBe("ok")
     expect(r.detail).toBe("#42 merged")
-  })
-  test("escaped title detail is sanitized", () => {
-    const r = classifyMr("github", `{"state":"open","reviewDecision":"APPROVED","number":42}`)
-    expect(r.detail).not.toMatch(/\x1b/)
   })
 })
 

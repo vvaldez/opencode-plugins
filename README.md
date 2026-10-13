@@ -28,8 +28,10 @@ endpoint, reset), `/dials-refresh` to re-check. See
 display-only (`enabled`, `surface`, clamped `interval`) — a hostile repo
 cannot seed commands or fetch targets. Every check runs a fixed argv
 assembled in code; there is no shell and no string interpolation. The
-endpoint is dialog-only and https-validated, with a reset action. Pure
-helpers have a unit-test target (`bun test packages/dials/test/`).
+endpoint is dialog-only and https-validated on every read (durable state
+written by older versions is re-validated the same way, and a reset action
+restores defaults). Pure helpers have a unit-test target
+(`bun test packages/dials/test/`).
 
 ## Trust posture
 

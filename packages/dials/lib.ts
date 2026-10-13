@@ -75,7 +75,9 @@ export function fromOptions(id: WidgetId, raw: unknown): WidgetConfig {
 
 // Durable storage is seeded from options and mutated by the /dials dialog;
 // validate on read so a stale or tampered shape falls back to defaults.
-// The vpn endpoint is dialog-only and must be https.
+// The vpn endpoint is dialog-only and must be https. Storage written before
+// this validation (e.g. an upgrade from an older build) is bounded by the
+// same https-only read check plus the dialog's reset action.
 export function fromStorage(id: WidgetId, raw: unknown): WidgetConfig {
   const cfg = fromOptions(id, raw)
   if (id === "vpn") {

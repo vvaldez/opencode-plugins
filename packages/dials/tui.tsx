@@ -45,13 +45,15 @@ const PENDING_GRACE = 30_000
 // events do not fire here). Argv elements pass through literally — there is
 // no shell and nothing to quote or inject. Both pipes are capped; a stream
 // exceeding its cap kills the process. exited and the drains resolve together
-// so a fast-exiting child cannot win a race with its own output.
-async function runArgv(argv: string[], cwd?: string, timeoutMs = 15_000): Promise<{ code: number; stdout: string; stderr: string }> {
+// so a fast-exiting child cannot win a race with its own output. Bun reports
+// exitCode null for signal kills (its native timeout, or the cap kill) —
+// surfaced as `killed`, not a GNU-style 124.
+async function runArgv(argv: string[], cwd?: string, timeoutMs = 15_000): Promise<{ code: number; killed: boolean; stdout: string; stderr: string }> {
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", timeout: timeoutMs })
   } catch {
-    return { code: 127, stdout: "", stderr: "" }
+    return { code: 127, killed: false, stdout: "", stderr: "" }
   }
   const drain = async (stream: ReadableStream<Uint8Array> | undefined, cap: number, killOnCap: boolean) => {
     if (!stream) return ""
@@ -71,17 +73,16 @@ async function runArgv(argv: string[], cwd?: string, timeoutMs = 15_000): Promis
     } catch {}
     return out
   }
-  const [code, stdout, stderr] = await Promise.all([
+  const [rawCode, stdout, stderr] = await Promise.all([
     proc.exited,
     drain(proc.stdout as ReadableStream<Uint8Array> | undefined, STDIO_CAP, true),
     drain(proc.stderr as ReadableStream<Uint8Array> | undefined, STDERR_CAP, false),
   ])
-  return { code: code ?? 1, stdout, stderr }
+  return { code: rawCode ?? 1, killed: rawCode === null, stdout, stderr }
 }
 
 // A timed-out or killed child can orphan grandchildren of the command it ran;
 // accepted for v1 (fixed argv commands are short-lived CLI queries).
-const timedOut = (code: number) => code === 124
 
 async function detectForge(cwd: string): Promise<"github" | "gitlab" | undefined> {
   const { stdout } = await runArgv(["git", "remote", "get-url", "origin"], cwd, 5_000)
@@ -94,7 +95,7 @@ async function detectForge(cwd: string): Promise<"github" | "gitlab" | undefined
 // --- widget checks (fixed argv only) ----------------------------------------
 
 async function checkVault(cwd: string): Promise<DialState> {
-  const { code, stdout, stderr } = await runArgv(["bw", "status"], cwd, 8_000)
+  const { code, killed, stdout, stderr } = await runArgv(["bw", "status"], cwd, 8_000)
   if (code === 127) return { id: "vault", status: "unknown", detail: "no bw", autoHide: true, checkedAt: Date.now() }
   try {
     const parsed = firstJson(stdout)
@@ -102,7 +103,7 @@ async function checkVault(cwd: string): Promise<DialState> {
     if (parsed?.status === "locked") return { id: "vault", status: "fail", detail: "locked", checkedAt: Date.now() }
     return { id: "vault", status: "warn", detail: safe(String(parsed?.status ?? "unknown")), checkedAt: Date.now() }
   } catch {
-    if (timedOut(code)) return { id: "vault", status: "unknown", detail: "timed out", checkedAt: Date.now() }
+    if (killed) return { id: "vault", status: "unknown", detail: "timed out", checkedAt: Date.now() }
     return { id: "vault", status: "unknown", detail: safe(stderr) || "parse", checkedAt: Date.now() }
   }
 }
@@ -121,12 +122,12 @@ async function checkVpn(cfg: WidgetConfig): Promise<DialState> {
 async function checkCi(cwd: string, branch: string): Promise<DialState> {
   const forge = await detectForge(cwd)
   if (!forge) return { id: "ci", status: "unknown", detail: "no git repo", autoHide: true, checkedAt: Date.now() }
-  const { code, stdout, stderr } = forge === "gitlab"
+  const { code, killed, stdout, stderr } = forge === "gitlab"
     ? await runArgv(["glab", "ci", "list", "-F", "json", "--ref", branch], cwd)
     : await runArgv(["gh", "run", "list", "--branch", branch, "--limit", "1", "--json", "status,conclusion,displayTitle"], cwd)
   if (code === 127) return { id: "ci", status: "unknown", detail: forge === "gitlab" ? "no glab" : "no gh", autoHide: true, checkedAt: Date.now() }
   if (code !== 0) {
-    return { id: "ci", status: "unknown", detail: timedOut(code) ? "timed out" : safe(stderr) || `${forge} exit ${code}`, checkedAt: Date.now() }
+    return { id: "ci", status: "unknown", detail: killed ? "timed out" : safe(stderr) || `${forge} exit ${code}`, checkedAt: Date.now() }
   }
   const { status, detail } = classifyCi(forge, stdout)
   return { id: "ci", status, detail, checkedAt: Date.now() }
@@ -135,7 +136,7 @@ async function checkCi(cwd: string, branch: string): Promise<DialState> {
 async function checkMr(cwd: string, branch: string): Promise<DialState> {
   const forge = await detectForge(cwd)
   if (!forge) return { id: "mr", status: "unknown", detail: "no git repo", autoHide: true, checkedAt: Date.now() }
-  const { code, stdout, stderr } = forge === "gitlab"
+  const { code, killed, stdout, stderr } = forge === "gitlab"
     ? await runArgv(["glab", "mr", "list", "-F", "json", "--source-branch", branch], cwd)
     : await runArgv(["gh", "pr", "view", "--json", "state,reviewDecision,url,number"], cwd)
   if (code === 127) return { id: "mr", status: "unknown", detail: forge === "gitlab" ? "no glab" : "no gh", autoHide: true, checkedAt: Date.now() }
@@ -143,7 +144,7 @@ async function checkMr(cwd: string, branch: string): Promise<DialState> {
     // gh exits non-zero when the branch has no PR — that is a normal state.
     const reason = safe(stderr)
     const none = /no pull request|no open pull/i.test(reason)
-    return { id: "mr", status: "unknown", detail: timedOut(code) ? "timed out" : none ? "no pr" : reason || "none", checkedAt: Date.now() }
+    return { id: "mr", status: "unknown", detail: killed ? "timed out" : none ? "no pr" : reason || "none", checkedAt: Date.now() }
   }
   const { status, detail } = classifyMr(forge, stdout)
   return { id: "mr", status, detail, checkedAt: Date.now() }
@@ -187,8 +188,9 @@ export default Plugin.define({
       if (branchCache && Date.now() - branchCache.at < BRANCH_TTL) return branchCache.value
       const loc = context.location ?? context.data.location.default()
       // vcs.sync is documented but its settle time is not bounded; race it
-      // against a timer so a hung sync cannot stall a poll cycle.
-      await Promise.race([context.data.location.vcs.sync(loc), new Promise<void>((resolve) => setTimeout(resolve, 10_000))])
+      // against a timer so a hung sync cannot stall a poll cycle. .catch keeps
+      // the loser's rejection from going unhandled when the timer wins.
+      await Promise.race([context.data.location.vcs.sync(loc).catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, 10_000))])
       const vcs = context.data.location.vcs.info(loc)
       const value = vcs?.branch.current ?? ""
       branchCache = { value, at: Date.now() }
@@ -229,18 +231,26 @@ export default Plugin.define({
       }
     }
 
-    const timers: ReturnType<typeof setInterval>[] = []
+    const timers = new Map<WidgetId, ReturnType<typeof setInterval>>()
 
     function poll(id: WidgetId) {
       const cfg = widgetCfg(id)
       if (!cfg.enabled || hidden.has(id)) return
+      const existing = timers.get(id)
+      if (existing) clearInterval(existing)
       void checkOne(id)
-      timers.push(setInterval(() => void checkOne(id), cfg.interval))
+      timers.set(id, setInterval(() => void checkOne(id), cfg.interval))
+    }
+
+    // Re-register one widget's interval — used when an auto-hidden widget is
+    // un-hidden by a dialog action, so its cadence resumes.
+    function restart(id: WidgetId) {
+      poll(id)
     }
 
     function startAll() {
-      timers.forEach(clearInterval)
-      timers.length = 0
+      timers.forEach((t) => clearInterval(t))
+      timers.clear()
       WIDGETS.forEach(poll)
     }
     startAll()
@@ -253,7 +263,7 @@ export default Plugin.define({
         return s && (s.status === "fail" || s.status === "unknown")
       })
       if (trouble.length > 0) {
-        context.ui.toast.show({ message: `dials refreshed · ${trouble.map((id) => LABEL[id]).join(", ")} failing` })
+        context.ui.toast.show({ message: `dials refreshed · ${trouble.map((id) => LABEL[id]).join(", ")} need attention` })
       } else {
         context.ui.toast.show({ message: "dials refreshed", variant: "success" })
       }
@@ -301,9 +311,9 @@ export default Plugin.define({
           {
             bind: "ctrl+s",
             title: "Surface",
-            onTrigger: (id) => {
+            onTrigger: async (id) => {
               const widget = id as WidgetId
-              updateSettings((draft: DialsConfig) => {
+              await updateSettings((draft: DialsConfig) => {
                 const next = widgetCfg(widget).surface === "off" ? "footer" : "off"
                 draft.widgets[widget].surface = next
               })
@@ -314,9 +324,9 @@ export default Plugin.define({
           {
             bind: "ctrl+e",
             title: "Enable",
-            onTrigger: (id) => {
+            onTrigger: async (id) => {
               const widget = id as WidgetId
-              updateSettings((draft: DialsConfig) => {
+              await updateSettings((draft: DialsConfig) => {
                 draft.widgets[widget].enabled = !draft.widgets[widget].enabled
               })
               hidden.delete(widget)
@@ -336,7 +346,8 @@ export default Plugin.define({
                 return
               }
               hidden.delete(widget)
-              void checkOne(widget)
+              restart(widget)
+              context.ui.toast.show({ message: `${widget} refreshed`, variant: "success" })
             },
           },
           {
@@ -358,18 +369,19 @@ export default Plugin.define({
                 }
                 updateSettings((draft: DialsConfig) => {
                   draft.widgets.vpn.endpoint = url
+                }).then(() => {
+                  void checkOne("vpn")
+                  context.ui.toast.show({ message: "vpn endpoint set", variant: "success" })
                 })
-                void checkOne("vpn")
-                context.ui.toast.show({ message: "vpn endpoint set", variant: "success" })
               })()
             },
           },
           {
             bind: "ctrl+x",
             title: "Reset",
-            onTrigger: (id) => {
+            onTrigger: async (id) => {
               const widget = id as WidgetId
-              updateSettings((draft: DialsConfig) => {
+              await updateSettings((draft: DialsConfig) => {
                 draft.widgets[widget] = { ...DEFAULTS.widgets[widget] }
               })
               hidden.delete(widget)
