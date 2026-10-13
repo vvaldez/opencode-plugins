@@ -91,11 +91,14 @@ export function fromStorage(id: WidgetId, raw: unknown): WidgetConfig {
 
 // External strings (commit titles, CLI error text) can carry ANSI escapes and
 // control characters; strip them before anything reaches a rendered surface.
+// CLI error text can also echo a resolved remote with embedded credentials
+// (https://user:PAT@host/...) — userinfo is redacted before rendering.
 export function safe(raw: string): string {
   return raw
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b./g, "")
     .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/\/\/[^@/\s]+@/g, "//***@")
     .slice(0, 80)
     .trim()
 }
@@ -170,12 +173,19 @@ export function classifyMr(forge: "github" | "gitlab", stdout: string): Classifi
 // External URLs: like safe() but without the 80-column slice — a URL must
 // stay complete to be usable. Rendered as inert text; the plugin never opens
 // one itself.
+// Rendered as inert text; the plugin never opens one. Escape-stripped and
+// userinfo-redacted like safe(), plus https-only: a non-https URL is dropped
+// rather than rendered (scheme validation at the control point — the vpn
+// endpoint enforces the same posture).
 export function safeUrl(raw: string): string {
-  return raw
+  const cleaned = raw
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
     .replace(/\x1b./g, "")
     .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/\/\/[^@/\s]+@/g, "//***@")
     .trim()
+  if (!/^https:\/\//i.test(cleaned)) return ""
+  return cleaned
 }
 
 // One row of the CI detail panel: a recent pipeline run for the branch.

@@ -198,6 +198,9 @@ export default Plugin.define({
       await Promise.race([context.data.location.vcs.sync(loc).catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, 10_000))])
       const vcs = context.data.location.vcs.info(loc)
       const value = vcs?.branch.current ?? ""
+      // A branch name beginning with "-" is legal git but an option-lookalike
+      // in a CLI flag value — reject it at the trust boundary (secops review).
+      if (value.startsWith("-")) return ""
       branchCache = { value, at: Date.now() }
       return value
     }
@@ -208,35 +211,46 @@ export default Plugin.define({
     // the footer pollers stay on their own cadence. Solid signals: the panel
     // slot's render body runs once and untracked (plugin/render.tsx Slot
     // semantics), so the JSX reads these through function children — the only
-    // tracked path into a mounted contribution.
-    const [ciDetail, setCiDetail] = createSignal<{ runs: CiRun[]; at: number } | undefined>(undefined)
-    const [mrDetail, setMrDetail] = createSignal<{ info: MrInfo | undefined; at: number } | undefined>(undefined)
+    // tracked path into a mounted contribution. An optional note carries CLI
+    // failures (timed out, no gh, exit code, stderr) — a failed fetch must
+    // not read as a false "none" (devops review TRACK).
+    const [ciDetail, setCiDetail] = createSignal<{ runs: CiRun[]; at: number; note?: string } | undefined>(undefined)
+    const [mrDetail, setMrDetail] = createSignal<{ info: MrInfo | undefined; at: number; note?: string } | undefined>(undefined)
 
     async function loadDetail(view: "ci" | "mr"): Promise<void> {
-      const branch = await readBranch()
-      if (!branch) {
+      const fail = (note: string) => {
+        if (view === "ci") setCiDetail({ runs: [], at: Date.now(), note })
+        else setMrDetail({ info: undefined, at: Date.now(), note })
+      }
+      const none = () => {
         if (view === "ci") setCiDetail({ runs: [], at: Date.now() })
         else setMrDetail({ info: undefined, at: Date.now() })
-        return
       }
-      const forge = await detectForge(cwd)
-      if (!forge) {
-        if (view === "ci") setCiDetail({ runs: [], at: Date.now() })
-        else setMrDetail({ info: undefined, at: Date.now() })
-        return
-      }
-      if (view === "ci") {
-        const { code, stdout } =
-          forge === "gitlab"
-            ? await runArgv(["glab", "ci", "list", "-F", "json", "--ref", branch], cwd)
-            : await runArgv(["gh", "run", "list", "--branch", branch, "--limit", "5", "--json", "status,conclusion,displayTitle,createdAt"], cwd)
-        setCiDetail({ runs: code === 0 ? ciRuns(forge, stdout) : [], at: Date.now() })
-      } else {
-        const { code, stdout } =
-          forge === "gitlab"
-            ? await runArgv(["glab", "mr", "list", "-F", "json", "--source-branch", branch], cwd)
-            : await runArgv(["gh", "pr", "view", "--json", "state,reviewDecision,url,number,title"], cwd)
-        setMrDetail({ info: code === 0 ? mrInfo(forge, stdout) : undefined, at: Date.now() })
+      try {
+        const branch = await readBranch()
+        if (!branch) return none()
+        const forge = await detectForge(cwd)
+        if (!forge) return none()
+        const argv =
+          view === "ci"
+            ? forge === "gitlab"
+              ? ["glab", "ci", "list", "-F", "json", "--ref", branch]
+              : ["gh", "run", "list", "--branch", branch, "--limit", "5", "--json", "status,conclusion,displayTitle,createdAt"]
+            : forge === "gitlab"
+              ? ["glab", "mr", "list", "-F", "json", "--source-branch", branch]
+              : ["gh", "pr", "view", "--json", "state,reviewDecision,url,number,title"]
+        const { code, killed, stdout, stderr } = await runArgv(argv, cwd)
+        if (code === 127) return fail(forge === "gitlab" ? "no glab" : "no gh")
+        if (code !== 0) {
+          // gh exits non-zero when the branch has no PR — a normal none.
+          const reason = safe(stderr)
+          if (view === "mr" && /no pull request|no open pull/i.test(reason)) return none()
+          return fail(killed ? "timed out" : reason || `${forge} exit ${code}`)
+        }
+        if (view === "ci") setCiDetail({ runs: ciRuns(forge, stdout), at: Date.now() })
+        else setMrDetail({ info: mrInfo(forge, stdout), at: Date.now() })
+      } catch (e) {
+        fail(safe(String(e)))
       }
     }
 
@@ -365,9 +379,12 @@ export default Plugin.define({
     // the slot (the host's panel Show is keyed on the active target,
     // session-frame.tsx), so the body re-runs with the new name.
     const ciView = () => {
+      version() // subscribe: the heartbeat ages the title's staleness label
       const detail = ciDetail()
       const title = `ci — recent runs${detail ? ` (${ago(detail.at)})` : ""}`
       if (!detail) return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>…</text>]
+      if (detail.note)
+        return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>{`failed to load runs: ${detail.note}`}</text>]
       if (detail.runs.length === 0)
         return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>no runs for this branch</text>]
       return [
@@ -378,9 +395,12 @@ export default Plugin.define({
       ]
     }
     const mrView = () => {
+      version() // subscribe: the heartbeat ages the title's staleness label
       const detail = mrDetail()
       const title = `mr — current branch${detail ? ` (${ago(detail.at)})` : ""}`
       if (!detail) return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>…</text>]
+      if (detail.note)
+        return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>{`failed to load mr: ${detail.note}`}</text>]
       if (!detail.info)
         return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>no merge request for this branch</text>]
       const info = detail.info
@@ -506,12 +526,12 @@ export default Plugin.define({
                 context.ui.toast.show({ message: `${LABEL[widget]} has no detail view` })
                 return
               }
-              void loadDetail(widget)
               const opened = context.ui.panel.open(`dials.${widget}`)
               if (!opened) {
                 context.ui.toast.show({ message: "panels need a live session" })
                 return
               }
+              void loadDetail(widget)
               context.ui.dialog.clear()
             },
           },

@@ -54,6 +54,19 @@ describe("safe", () => {
   test("plain text passes through", () => {
     expect(safe("fix: close dual-review findings")).toBe("fix: close dual-review findings")
   })
+  test("redacts URL userinfo (embedded credentials in echoed remotes)", () => {
+    expect(safe("error: could not resolve https://user:PAT-token@gitlab.example/group/repo")).toBe(
+      "error: could not resolve https://***@gitlab.example/group/repo",
+    )
+  })
+  test("redacts bare-token userinfo (no colon)", () => {
+    expect(safe("fatal: unable to access 'https://ghp_abc123@github.com/x/y.git/'")).toBe(
+      "fatal: unable to access 'https://***@github.com/x/y.git/'",
+    )
+  })
+  test("leaves URLs without userinfo alone", () => {
+    expect(safe("remote: https://github.com/x/y.git at path@2")).toBe("remote: https://github.com/x/y.git at path@2")
+  })
 })
 
 describe("ago", () => {
@@ -203,6 +216,18 @@ describe("safeUrl (full URL, escapes stripped, no 80-column slice)", () => {
   })
   test("trims whitespace", () => {
     expect(safeUrl("  https://x  ")).toBe("https://x")
+  })
+  test("drops non-https schemes (javascript:, http:, ssh:)", () => {
+    expect(safeUrl("javascript:alert(1)")).toBe("")
+    expect(safeUrl("http://github.com/x/y")).toBe("")
+    expect(safeUrl("ssh://git@github.com/x/y")).toBe("")
+  })
+  test("redacts URL userinfo", () => {
+    expect(safeUrl("https://user:secret@github.com/x/y")).toBe("https://***@github.com/x/y")
+  })
+  test("drops empty and escape-only input", () => {
+    expect(safeUrl("")).toBe("")
+    expect(safeUrl("\x1b[31m")).toBe("")
   })
 })
 
