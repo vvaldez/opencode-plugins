@@ -9,7 +9,8 @@ Small OpenCode TUI (CLI) plugins, built with the maintainer-endorsed slot API.
 Shows the harness version in the in-session footer status row
 (`prompt.footer.status`) — e.g. `v2.0.27`. The session footer has no
 built-in version display; the home footer hides its version below 64
-columns. ~15 lines. See [packages/version-footer](packages/version-footer).
+columns. No network calls, no shell, no files — ~15 lines. See
+[packages/version-footer](packages/version-footer).
 
 ### dials — `packages/dials`
 
