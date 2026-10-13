@@ -7,14 +7,19 @@ import {
   LABEL,
   WIDGETS,
   ago,
+  ciRuns,
   classifyCi,
   classifyMr,
   firstJson,
   fromOptions,
   fromStorage,
+  mrInfo,
   safe,
+  type CiRun,
   type DialState,
+  type DialStatus,
   type DialsConfig,
+  type MrInfo,
   type WidgetConfig,
   type WidgetId,
 } from "./lib.ts"
@@ -197,6 +202,44 @@ export default Plugin.define({
       return value
     }
 
+    // --- detail views (panel milestone) ----------------------------------------
+
+    // Detail data is fetched on demand (each time the dialog opens a view) —
+    // the footer pollers stay on their own cadence. Solid signals: the panel
+    // slot's render body runs once and untracked (plugin/render.tsx Slot
+    // semantics), so the JSX reads these through function children — the only
+    // tracked path into a mounted contribution.
+    const [ciDetail, setCiDetail] = createSignal<{ runs: CiRun[]; at: number } | undefined>(undefined)
+    const [mrDetail, setMrDetail] = createSignal<{ info: MrInfo | undefined; at: number } | undefined>(undefined)
+
+    async function loadDetail(view: "ci" | "mr"): Promise<void> {
+      const branch = await readBranch()
+      if (!branch) {
+        if (view === "ci") setCiDetail({ runs: [], at: Date.now() })
+        else setMrDetail({ info: undefined, at: Date.now() })
+        return
+      }
+      const forge = await detectForge(cwd)
+      if (!forge) {
+        if (view === "ci") setCiDetail({ runs: [], at: Date.now() })
+        else setMrDetail({ info: undefined, at: Date.now() })
+        return
+      }
+      if (view === "ci") {
+        const { code, stdout } =
+          forge === "gitlab"
+            ? await runArgv(["glab", "ci", "list", "-F", "json", "--ref", branch], cwd)
+            : await runArgv(["gh", "run", "list", "--branch", branch, "--limit", "5", "--json", "status,conclusion,displayTitle,createdAt"], cwd)
+        setCiDetail({ runs: code === 0 ? ciRuns(forge, stdout) : [], at: Date.now() })
+      } else {
+        const { code, stdout } =
+          forge === "gitlab"
+            ? await runArgv(["glab", "mr", "list", "-F", "json", "--source-branch", branch], cwd)
+            : await runArgv(["gh", "pr", "view", "--json", "state,reviewDecision,url,number,title"], cwd)
+        setMrDetail({ info: code === 0 ? mrInfo(forge, stdout) : undefined, at: Date.now() })
+      }
+    }
+
     async function checkOne(id: WidgetId): Promise<void> {
       if (inFlight.has(id)) return
       inFlight.add(id)
@@ -269,25 +312,103 @@ export default Plugin.define({
       }
     }
 
-    // Footer: compact segments after OpenCode's health indicators.
+    // The theme's semantic feedback colors (theme 2.0.28): ok/warn/fail take
+    // their kind, unknown stays muted. Shared by the footer and the panel.
+    const colorFor = (status: DialStatus) =>
+      status === "ok"
+        ? context.theme.text.feedback.success.base
+        : status === "warn"
+          ? context.theme.text.feedback.warning.base
+          : status === "fail"
+            ? context.theme.text.feedback.error.base
+            : context.theme.text.muted
+
+    // Footer: compact segments after OpenCode's health indicators. One text
+    // node with span children — sibling text nodes wrap (the slot container
+    // constrains each item); spans flow inline, the host's own footer hints
+    // use the same pattern. Each dial takes the feedback color for its
+    // status (panel-milestone decision); separators and pending markers stay
+    // muted.
     const slot = context.ui.slot({
       append: "prompt.footer.status",
       render: () => {
         version() // subscribe: every bump repaints
         const pending = Date.now() - startedAt < PENDING_GRACE
-        const segments: string[] = []
+        const parts: any[] = []
+        let first = true
         for (const id of WIDGETS) {
           const cfg = widgetCfg(id)
           const state = states[id]
           if (!cfg.enabled || cfg.surface === "off" || hidden.has(id)) continue
+          // Spans take color via style (the host's footer hints do the same) —
+          // a bare fg prop on a span is ignored.
+          if (!first) parts.push(<span style={{ fg: context.theme.text.muted }}> · </span>)
+          first = false
           if (!state) {
-            segments.push(`${LABEL[id]} ${pending ? "…" : "?"}`)
+            parts.push(<span style={{ fg: context.theme.text.muted }}>{`${LABEL[id]} ${pending ? "…" : "?"}`}</span>)
             continue
           }
           const stale = id === "ci" || id === "mr" ? ` ${ago(state.checkedAt)}` : ""
-          segments.push(`${LABEL[id]} ${GLYPH[state.status]}${stale}`)
+          parts.push(<span style={{ fg: colorFor(state.status) }}>{`${LABEL[id]} ${GLYPH[state.status]}${stale}`}</span>)
         }
-        return <text fg={context.theme.text.base}>{segments.join(" · ")}</text>
+        return <text fg={context.theme.text.base}>{parts}</text>
+      },
+    })
+
+    // Panel: the ci and mr detail views (panel milestone). One contribution,
+    // gated on the shared selection name. Inline render only — a component
+    // with a layer registered inside its tree breaks the panel's rendering
+    // (probe runs 6-7, research/panel-milestone-design.md). The slot's render
+    // body runs once and untracked (plugin/render.tsx Slot semantics), so all
+    // data reads go through signal accessors inside function children — the
+    // only tracked path into a mounted contribution. A view switch remounts
+    // the slot (the host's panel Show is keyed on the active target,
+    // session-frame.tsx), so the body re-runs with the new name.
+    const ciView = () => {
+      const detail = ciDetail()
+      const title = `ci — recent runs${detail ? ` (${ago(detail.at)})` : ""}`
+      if (!detail) return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>…</text>]
+      if (detail.runs.length === 0)
+        return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>no runs for this branch</text>]
+      return [
+        <text fg={context.theme.text.base}>{title}</text>,
+        ...detail.runs.map((run) => (
+          <text fg={colorFor(run.status)}>{`${GLYPH[run.status]} ${run.title}${run.when ? ` · ${run.when}` : ""}`}</text>
+        )),
+      ]
+    }
+    const mrView = () => {
+      const detail = mrDetail()
+      const title = `mr — current branch${detail ? ` (${ago(detail.at)})` : ""}`
+      if (!detail) return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>…</text>]
+      if (!detail.info)
+        return [<text fg={context.theme.text.base}>{title}</text>, <text fg={context.theme.text.muted}>no merge request for this branch</text>]
+      const info = detail.info
+      return [
+        <text fg={context.theme.text.base}>{title}</text>,
+        <text fg={colorFor(info.status)}>{`${GLYPH[info.status]} ${info.label}${info.title ? ` ${info.title}` : ""}`}</text>,
+        ...(info.review ? [<text fg={context.theme.text.muted}>{`review: ${info.review}`}</text>] : []),
+        ...(info.url ? [<text fg={context.theme.text.muted}>{info.url}</text>] : []),
+      ]
+    }
+    context.ui.slot({
+      append: "session.panel",
+      render: (panel) => {
+        if (panel.name === "dials.ci") {
+          return (
+            <box flexDirection="column" paddingLeft={1} paddingTop={1} gap={0}>
+              {() => ciView()}
+            </box>
+          )
+        }
+        if (panel.name === "dials.mr") {
+          return (
+            <box flexDirection="column" paddingLeft={1} paddingTop={1} gap={0}>
+              {() => mrView()}
+            </box>
+          )
+        }
+        return null
       },
     })
 
@@ -377,6 +498,24 @@ export default Plugin.define({
             },
           },
           {
+            bind: "ctrl+d",
+            title: "Detail",
+            onTrigger: (id) => {
+              const widget = id as WidgetId
+              if (widget !== "ci" && widget !== "mr") {
+                context.ui.toast.show({ message: `${LABEL[widget]} has no detail view` })
+                return
+              }
+              void loadDetail(widget)
+              const opened = context.ui.panel.open(`dials.${widget}`)
+              if (!opened) {
+                context.ui.toast.show({ message: "panels need a live session" })
+                return
+              }
+              context.ui.dialog.clear()
+            },
+          },
+          {
             bind: "ctrl+x",
             title: "Reset",
             onTrigger: async (id) => {
@@ -414,6 +553,27 @@ export default Plugin.define({
           palette: true,
           run: async () => {
             await refreshAll()
+          },
+        },
+      ],
+    }))
+
+    // Close UX (panel milestone): a setup-registered global escape binding.
+    // The prompt textarea holds focus normally, so a global layer fires from
+    // anywhere; while a panel is open the host's box has focus and prompt
+    // keystrokes do not arrive — this binding is the close path. Returns
+    // false (continue keyboard dispatch) when no panel is open so dialogs
+    // keep their own escape handling.
+    context.keymap.layer(() => ({
+      mode: "global",
+      commands: [
+        {
+          bind: "escape",
+          run: () => {
+            const current = context.ui.panel.current()
+            if (!current) return false
+            context.ui.panel.close()
+            return undefined
           },
         },
       ],

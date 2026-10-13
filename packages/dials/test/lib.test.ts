@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test"
 import {
   DEFAULTS,
   ago,
+  ciRuns,
   classifyCi,
   classifyMr,
   firstJson,
   fromOptions,
   fromStorage,
+  mrInfo,
   safe,
+  safeUrl,
 } from "../lib.ts"
 
 describe("firstJson", () => {
@@ -187,5 +190,99 @@ describe("classifyMr (gitlab)", () => {
   })
   test("no mrs", () => {
     expect(classifyMr("gitlab", `[]`).status).toBe("unknown")
+  })
+})
+
+describe("safeUrl (full URL, escapes stripped, no 80-column slice)", () => {
+  test("keeps a long URL intact", () => {
+    const url = "https://gitlab.cee.redhat.com/fieldcto-na/common-tooling/core/-/merge_requests/80"
+    expect(safeUrl(url)).toBe(url)
+  })
+  test("strips ANSI escapes and control characters", () => {
+    expect(safeUrl("https://x\u001b[31m/y\u0007/z\u001b.")).toBe("https://x/y/z")
+  })
+  test("trims whitespace", () => {
+    expect(safeUrl("  https://x  ")).toBe("https://x")
+  })
+})
+
+describe("ciRuns (github)", () => {
+  test("maps conclusion success/failure to ok/fail", () => {
+    const runs = ciRuns("github", `[{"status":"completed","conclusion":"success","displayTitle":"fix: x","createdAt":"2026-10-13T10:00:00Z"},{"status":"completed","conclusion":"failure","displayTitle":"fix: y","createdAt":"2026-10-13T09:00:00Z"}]`)
+    expect(runs.length).toBe(2)
+    expect(runs[0].status).toBe("ok")
+    expect(runs[1].status).toBe("fail")
+    expect(runs[0].title).toBe("fix: x")
+    expect(runs[0].when).not.toBe("")
+  })
+  test("maps in_progress/queued to warn", () => {
+    const runs = ciRuns("github", `[{"status":"in_progress","conclusion":null,"displayTitle":"wip"}]`)
+    expect(runs[0].status).toBe("warn")
+  })
+  test("limits to 5 rows", () => {
+    const rows = Array.from({ length: 9 }, (_, i) => `{"status":"completed","conclusion":"success","displayTitle":"r${i}","createdAt":"2026-10-13T10:0${i}:00Z"}`).join(",")
+    expect(ciRuns("github", `[${rows}]`).length).toBe(5)
+  })
+  test("unknown conclusion degrades to unknown", () => {
+    const runs = ciRuns("github", `[{"status":"completed","conclusion":"skipped","displayTitle":"x"}]`)
+    expect(runs[0].status).toBe("unknown")
+  })
+  test("malformed output degrades to empty", () => {
+    expect(ciRuns("github", "no json")).toEqual([])
+  })
+  test("missing createdAt leaves when empty", () => {
+    const runs = ciRuns("github", `[{"status":"completed","conclusion":"success","displayTitle":"x"}]`)
+    expect(runs[0].when).toBe("")
+  })
+})
+
+describe("ciRuns (gitlab)", () => {
+  test("maps pipeline status success/failed/running", () => {
+    const runs = ciRuns("gitlab", `[{"id":1,"status":"success","ref":"main","created_at":"2026-10-13T10:00:00Z"},{"id":2,"status":"failed","ref":"fix-ci","created_at":"2026-10-13T09:00:00Z"},{"id":3,"status":"running","ref":"wip","created_at":"2026-10-13T08:00:00Z"}]`)
+    expect(runs.map((r) => r.status)).toEqual(["ok", "fail", "warn"])
+    expect(runs[0].title).toBe("main")
+  })
+  test("pending maps to warn", () => {
+    expect(ciRuns("gitlab", `[{"id":1,"status":"pending","ref":"main"}]`)[0].status).toBe("warn")
+  })
+  test("unknown status degrades to unknown", () => {
+    expect(ciRuns("gitlab", `[{"id":1,"status":"canceled","ref":"main"}]`)[0].status).toBe("unknown")
+  })
+  test("malformed output degrades to empty", () => {
+    expect(ciRuns("gitlab", "")).toEqual([])
+  })
+})
+
+describe("mrInfo (github)", () => {
+  test("maps state/reviewDecision", () => {
+    expect(mrInfo("github", `{"state":"open","reviewDecision":"APPROVED","number":42,"title":"t","url":"https://x/pr/42"}`)?.status).toBe("ok")
+    expect(mrInfo("github", `{"state":"open","reviewDecision":"CHANGES_REQUESTED","number":42,"title":"t","url":"https://x/pr/42"}`)?.status).toBe("fail")
+    expect(mrInfo("github", `{"state":"open","reviewDecision":null,"number":42,"title":"t","url":"https://x/pr/42"}`)?.status).toBe("warn")
+    expect(mrInfo("github", `{"state":"merged","number":42,"title":"t","url":"https://x/pr/42"}`)?.status).toBe("ok")
+  })
+  test("carries label, title, url, review", () => {
+    const info = mrInfo("github", `{"state":"open","reviewDecision":"APPROVED","number":42,"title":"fix: x","url":"https://x/pr/42"}`)
+    expect(info?.label).toBe("#42")
+    expect(info?.title).toBe("fix: x")
+    expect(info?.url).toBe("https://x/pr/42")
+    expect(info?.review).toBe("APPROVED")
+  })
+  test("empty list or no json -> undefined", () => {
+    expect(mrInfo("github", "[]")).toBeUndefined()
+    expect(mrInfo("github", "no json")).toBeUndefined()
+  })
+})
+
+describe("mrInfo (gitlab)", () => {
+  test("maps state opened/merged with iid label", () => {
+    const info = mrInfo("gitlab", `[{"iid":80,"state":"opened","title":"bw-session cache","web_url":"https://gitlab.cee.redhat.com/x/-/merge_requests/80"}]`)
+    expect(info?.label).toBe("!80")
+    expect(info?.status).toBe("warn")
+    expect(info?.title).toBe("bw-session cache")
+    expect(info?.url).toBe("https://gitlab.cee.redhat.com/x/-/merge_requests/80")
+    expect(mrInfo("gitlab", `[{"iid":80,"state":"merged","title":"t"}]`)?.status).toBe("ok")
+  })
+  test("no MR (empty list) -> undefined", () => {
+    expect(mrInfo("gitlab", `[]`)).toBeUndefined()
   })
 })

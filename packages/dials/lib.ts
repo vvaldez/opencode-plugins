@@ -164,3 +164,85 @@ export function classifyMr(forge: "github" | "gitlab", stdout: string): Classifi
     return { status: "unknown", detail: "parse" }
   }
 }
+
+// --- detail views (panel milestone) ----------------------------------------
+
+// External URLs: like safe() but without the 80-column slice — a URL must
+// stay complete to be usable. Rendered as inert text; the plugin never opens
+// one itself.
+export function safeUrl(raw: string): string {
+  return raw
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b./g, "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim()
+}
+
+// One row of the CI detail panel: a recent pipeline run for the branch.
+export type CiRun = { status: DialStatus; title: string; when: string }
+
+// gh run list --limit N --json status,conclusion,displayTitle,createdAt |
+// glab ci list -F json --ref <branch>. Degrades to [] on malformed output —
+// the panel says "no runs", never crashes.
+export function ciRuns(forge: "github" | "gitlab", stdout: string): CiRun[] {
+  try {
+    const parsed = firstJson(stdout)
+    const rows = Array.isArray(parsed) ? parsed : [parsed]
+    return rows.slice(0, 5).map((run: any) => {
+      const raw = forge === "gitlab" ? run.created_at : run.createdAt
+      const ts = typeof raw === "string" ? Date.parse(raw) : NaN
+      const when = Number.isFinite(ts) ? ago(ts) : ""
+      if (forge === "gitlab") {
+        const s = String(run.status ?? "")
+        const status: DialStatus =
+          s === "success" ? "ok" : s === "failed" ? "fail" : s === "running" || s === "pending" ? "warn" : "unknown"
+        return { status, title: safe(String(run.ref ?? "pipeline")), when }
+      }
+      const status: DialStatus =
+        run.conclusion === "success"
+          ? "ok"
+          : run.conclusion === "failure"
+            ? "fail"
+            : run.status === "in_progress" || run.status === "queued"
+              ? "warn"
+              : "unknown"
+      return { status, title: safe(String(run.displayTitle ?? "run")), when }
+    })
+  } catch {
+    return []
+  }
+}
+
+// The MR detail panel's single row: the branch's merge request.
+export type MrInfo = { status: DialStatus; label: string; title: string; url: string; review: string }
+
+// gh pr view --json state,reviewDecision,url,number,title |
+// glab mr list -F json --source-branch <branch>. Undefined when the branch has
+// none — the panel says so, never crashes.
+export function mrInfo(forge: "github" | "gitlab", stdout: string): MrInfo | undefined {
+  try {
+    const parsed = firstJson(stdout)
+    const mr = Array.isArray(parsed) ? parsed[0] : parsed
+    if (!mr) return undefined
+    if (forge === "gitlab") {
+      const label = mr.iid ? `!${mr.iid}` : ""
+      const status: DialStatus = mr.state === "opened" ? "warn" : mr.state === "merged" ? "ok" : "unknown"
+      return { status, label, title: safe(String(mr.title ?? "")), url: safeUrl(String(mr.web_url ?? "")), review: "" }
+    }
+    const label = mr.number ? `#${mr.number}` : ""
+    const review = String(mr.reviewDecision ?? "")
+    const status: DialStatus =
+      mr.state === "open"
+        ? review === "CHANGES_REQUESTED"
+          ? "fail"
+          : review === "APPROVED"
+            ? "ok"
+            : "warn"
+        : mr.state === "merged"
+          ? "ok"
+          : "unknown"
+    return { status, label, title: safe(String(mr.title ?? "")), url: safeUrl(String(mr.url ?? "")), review }
+  } catch {
+    return undefined
+  }
+}
