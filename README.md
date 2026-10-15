@@ -39,6 +39,26 @@ written by older versions is re-validated the same way, and a reset action
 restores defaults). Pure helpers have a unit-test target
 (`bun test packages/dials/test/`).
 
+### lastprompt — `packages/lastprompt`
+
+The session's last user prompt in the session sidebar, one or two lines
+under the built-in rows (a muted `last <truncated prompt>` line). Data
+comes from the host's own transcript store
+(`context.data.session.message.list`): no network calls, no shell, no
+files. Each session tab shows its own last prompt (the slot input
+carries the session view's sessionID), and the row repaints on submit
+without a poller. `/lastprompt` toggles the surface (sidebar | off),
+sets the line count (1 | 2), and resets. Default: on, one line, since
+installing the plugin is the opt-in. The row budget is sized for the
+host's fixed 42-column sidebar, so a one-line row stays one line. Pure
+helpers have a unit-test target (`bun test packages/lastprompt/test/`).
+See [packages/lastprompt](packages/lastprompt).
+
+Prior art: upstream #28035 (sticky last prompt) closed NOT_PLANNED with
+the maintainer preferring a slot-based plugin, and #32165 / #33130
+(sidebar message lists) closed as duplicates. This is the slot path
+that #28035 pointed at.
+
 ## Trust posture
 
 These plugins perform **no telemetry** and hold **no credentials** —
@@ -53,7 +73,8 @@ Clone the repo anywhere, then point `cli.json` at the package paths:
 {
   "plugins": [
     "/path/to/opencode-plugins/packages/version-footer",
-    "/path/to/opencode-plugins/packages/dials"
+    "/path/to/opencode-plugins/packages/dials",
+    "/path/to/opencode-plugins/packages/lastprompt"
   ]
 }
 ```

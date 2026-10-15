@@ -13,7 +13,7 @@ jobs:
         run: python3 -c "import json; json.load(open('package-lock.json')); print('lockfile valid')"
       - uses: oven-sh/setup-bun@v2
       - name: Plugin unit tests
-        run: bun test packages/dials/test/
+        run: bun test packages/dials/test/ packages/lastprompt/test/
       - name: Secret scan
         run: |
           if grep -rInE '(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9-]{20,})' --exclude-dir=.git .; then
@@ -22,6 +22,6 @@ jobs:
           fi
           echo "no credential-shaped strings"
       # No typecheck job: OpenTUI peers are host-resolved at runtime, so tsc
-      # cannot run against them in CI. The dials pure helpers have a bun test
-      # target above; runtime behavior is verified manually (pty-rendered
+      # cannot run against them in CI. The pure helpers have bun test
+      # targets above; runtime behavior is verified manually (pty-rendered
       # TUI) per the README.
