@@ -1,4 +1,4 @@
-// lastprompt — pure helpers for the last-prompt sidebar row.
+// lastprompt: pure helpers for the last-prompt sidebar row.
 //
 // Trust boundary: opencode.json options are display-only. A hostile
 // project config can at most flip the surface to off or widen the row
@@ -24,13 +24,6 @@ export function fromOptions(raw: unknown): LastPromptConfig {
   }
 }
 
-// Durable storage is seeded from options and mutated by the /lastprompt
-// dialog. Validate on read so a stale or tampered shape falls back to
-// the allow list.
-export function fromStorage(raw: unknown): LastPromptConfig {
-  return fromOptions(raw)
-}
-
 // The last user message's text, walking the transcript from the end.
 // Non-user rows (assistant, system, shell, compaction) are skipped, and
 // a user row with empty text does not satisfy the demand.
@@ -49,10 +42,12 @@ export function collapse(text: string): string {
   return text.replace(/\s+/g, " ").trim()
 }
 
-// The row budget in characters: 100 for one line, 200 for two (the host
-// wraps at the sidebar width). Truncation keeps the head and adds an
-// ellipsis.
-const BUDGET: Record<Lines, number> = { 1: 100, 2: 200 }
+// The row budget in characters. The host fixes the session sidebar at
+// 42 columns (SESSION_SIDEBAR_WIDTH, packages/tui/src/ui/layout.ts) and
+// wraps the row at that width, so the budget is the width minus the
+// "last " prefix and a margin: 36 for one line, 72 for two.
+// Truncation keeps the head and adds an ellipsis.
+const BUDGET: Record<Lines, number> = { 1: 36, 2: 72 }
 
 export function renderLine(text: string, lines: Lines): string {
   const one = collapse(text)

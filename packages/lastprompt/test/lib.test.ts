@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DEFAULTS, collapse, fromOptions, fromStorage, lastUserText, renderLine } from "../lib.ts"
+import { DEFAULTS, collapse, fromOptions, lastUserText, renderLine } from "../lib.ts"
 
 describe("lastUserText", () => {
   test("returns the last user message's text", () => {
@@ -56,18 +56,18 @@ describe("renderLine", () => {
     expect(renderLine("short prompt", 1)).toBe("short prompt")
   })
 
-  test("truncates past the one-line budget with an ellipsis", () => {
-    const text = "x".repeat(150)
+  test("fits the one-line budget: 42-column sidebar minus prefix and margin", () => {
+    const text = "x".repeat(40)
     const out = renderLine(text, 1)
     expect(out.endsWith("…")).toBe(true)
-    expect(out.length).toBe(100)
+    expect(out.length).toBe(36)
   })
 
   test("doubles the budget for two lines", () => {
-    const text = "x".repeat(150)
+    const text = "x".repeat(40)
     expect(renderLine(text, 2)).toBe(text)
-    const long = "x".repeat(250)
-    expect(renderLine(long, 2).length).toBe(200)
+    const long = "x".repeat(80)
+    expect(renderLine(long, 2).length).toBe(72)
   })
 })
 
@@ -86,11 +86,9 @@ describe("fromOptions", () => {
     expect(fromOptions({ surface: "off" }).surface).toBe("off")
     expect(fromOptions({ lines: 2 }).lines).toBe(2)
   })
-})
 
-describe("fromStorage", () => {
-  test("validates on read like options", () => {
-    expect(fromStorage({ surface: "off", lines: 2 })).toEqual({ surface: "off", lines: 2 })
-    expect(fromStorage("garbage")).toEqual(DEFAULTS)
+  test("storage reads validate on read like options", () => {
+    expect(fromOptions({ surface: "off", lines: 2 })).toEqual({ surface: "off", lines: 2 })
+    expect(fromOptions("garbage")).toEqual(DEFAULTS)
   })
 })

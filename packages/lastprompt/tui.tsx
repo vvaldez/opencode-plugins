@@ -1,15 +1,22 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
-import { DEFAULTS, fromOptions, fromStorage, lastUserText, renderLine, type LastPromptConfig } from "./lib.ts"
+import { DEFAULTS, fromOptions, lastUserText, renderLine, type LastPromptConfig } from "./lib.ts"
 
-// lastprompt — the session's last user prompt in the session sidebar,
+// lastprompt: the session's last user prompt in the session sidebar,
 // one or two lines under the built-in rows.
 //
 // Data: context.data.session.message.list(sessionID) is the host's own
 // transcript store (solid, event-published). A submitted prompt
 // repaints the row without a poller, and the plugin makes no API calls
-// of its own. The slot's input carries the sessionID for the session
-// view that owns the sidebar, so each tab shows its own last prompt.
+// of its own. The host seeds a session's message window with its
+// newest 20 rows, so on mount the plugin pages one older batch if
+// more exist: in a long agent turn the last user prompt can sit past
+// the window. If it is still absent after one batch (very long
+// sessions), the row shows nothing until the host pages more on
+// scroll.
+//
+// The slot's input carries the sessionID for the session view that
+// owns the sidebar, so each tab shows its own last prompt.
 //
 // Repaint model (dials lesson, research/panel-milestone-design.md):
 // the slot render body runs once, untracked. The read happens inside a
@@ -26,12 +33,18 @@ export default Plugin.define({
   setup(context) {
     const options = context.options as Partial<LastPromptConfig> | undefined
     const [settings, updateSettings] = context.storage.store("settings", { initial: fromOptions(options) })
-    const cfg = (): LastPromptConfig => fromStorage(settings)
+    const cfg = (): LastPromptConfig => fromOptions(settings)
 
     const slot = context.ui.slot({
       append: "sidebar.content",
       render: (input) => {
         const sessionID = input.sessionID
+        // The render body runs once per mount (untracked): the right
+        // place for the one-time window page-in. Outside the tracked
+        // child so a render pass stays side-effect free.
+        if (context.data.session.message.more(sessionID)) {
+          void context.data.session.message.loadMore(sessionID)
+        }
         return (
           <box>
             {() => {
@@ -48,17 +61,29 @@ export default Plugin.define({
 
     function openConfig() {
       const c = cfg()
+      // The shape every dialog action shares: apply the change, toast
+      // the result (read after the write, so it reflects the new
+      // value), and close the dialog.
+      function apply(mutate: (draft: LastPromptConfig) => void, toast: () => { message: string; variant?: "success" }) {
+        return () => {
+          void (async () => {
+            await updateSettings(mutate)
+            context.ui.toast.show(toast())
+            context.ui.dialog.clear()
+          })()
+        }
+      }
       void context.ui.dialog.select({
         title: "Last prompt",
         options: [
           {
-            title: `surface — ${c.surface}`,
+            title: `surface: ${c.surface}`,
             value: "surface",
             category: "Display",
             description: "sidebar shows the row, off hides it",
           },
           {
-            title: `lines — ${c.lines}`,
+            title: `lines: ${c.lines}`,
             value: "lines",
             category: "Display",
             description: "1 or 2 lines, the host wraps at the sidebar width",
@@ -69,44 +94,35 @@ export default Plugin.define({
             bind: "ctrl+s",
             title: "Surface",
             selection: "none",
-            onTrigger: () => {
-              void (async () => {
-                await updateSettings((draft: LastPromptConfig) => {
-                  draft.surface = draft.surface === "off" ? "sidebar" : "off"
-                })
-                context.ui.toast.show({ message: `surface → ${cfg().surface}` })
-                context.ui.dialog.clear()
-              })()
-            },
+            onTrigger: apply(
+              (draft) => {
+                draft.surface = draft.surface === "off" ? "sidebar" : "off"
+              },
+              () => ({ message: `surface → ${cfg().surface}` }),
+            ),
           },
           {
             bind: "ctrl+l",
             title: "Lines",
             selection: "none",
-            onTrigger: () => {
-              void (async () => {
-                await updateSettings((draft: LastPromptConfig) => {
-                  draft.lines = draft.lines === 1 ? 2 : 1
-                })
-                context.ui.toast.show({ message: `lines → ${cfg().lines}` })
-                context.ui.dialog.clear()
-              })()
-            },
+            onTrigger: apply(
+              (draft) => {
+                draft.lines = draft.lines === 1 ? 2 : 1
+              },
+              () => ({ message: `lines → ${cfg().lines}` }),
+            ),
           },
           {
             bind: "ctrl+x",
             title: "Reset",
             selection: "none",
-            onTrigger: () => {
-              void (async () => {
-                await updateSettings((draft: LastPromptConfig) => {
-                  draft.surface = DEFAULTS.surface
-                  draft.lines = DEFAULTS.lines
-                })
-                context.ui.toast.show({ message: "reset to defaults", variant: "success" })
-                context.ui.dialog.clear()
-              })()
-            },
+            onTrigger: apply(
+              (draft) => {
+                draft.surface = DEFAULTS.surface
+                draft.lines = DEFAULTS.lines
+              },
+              () => ({ message: "reset to defaults", variant: "success" }),
+            ),
           },
         ],
       })
