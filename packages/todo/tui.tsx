@@ -207,6 +207,7 @@ export default Plugin.define({
                     if (ok) save(() => [])
                     else openTodo()
                   })
+                  .catch(() => {})
               },
             },
           ],
@@ -224,10 +225,12 @@ export default Plugin.define({
                 if (!text) return
                 save((list) => addItem(list, text))
               })
+              .catch(() => {})
             return
           }
           save((list) => toggleItem(list, value.id))
         })
+        .catch(() => {})
     }
 
     const slot = context.ui.slot({
