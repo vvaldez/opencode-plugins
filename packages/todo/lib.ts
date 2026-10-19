@@ -29,6 +29,15 @@ export const BUDGET = 38
 // #28035 space lesson; installing the plugin is the opt-in.
 export const MAX_ITEMS = 6
 
+// The dialog's item text budget: the dialog is wider than the sidebar,
+// so long item text still truncates.
+export const DIALOG_BUDGET = 60
+
+// Per-session item cap on read. A hostile or buggy writer can produce
+// arbitrarily many items; the read drops everything past the cap
+// (validate-on-read, fail-closed).
+export const MAX_SESSION_ITEMS = 200
+
 let counter = 0
 export function newId(now = Date.now()): string {
   counter += 1
@@ -45,9 +54,13 @@ export function fromFile(raw: unknown): TodoFile {
   const rawSessions = (o.sessions ?? {}) as Record<string, unknown>
   for (const [key, value] of Object.entries(rawSessions)) {
     if (typeof key !== "string" || key.length === 0) continue
+    // prototype-hazard keys: the assignment below must create an own
+    // property, never invoke a prototype setter
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue
     if (!Array.isArray(value)) continue
     const list: TodoItem[] = []
     for (const entry of value) {
+      if (list.length >= MAX_SESSION_ITEMS) break
       const e = (entry ?? {}) as Record<string, unknown>
       if (typeof e.id !== "string" || e.id.length === 0) continue
       if (typeof e.text !== "string") continue
@@ -65,7 +78,10 @@ export function fromFile(raw: unknown): TodoFile {
 }
 
 export function itemsFor(file: TodoFile, sessionID: string): TodoItem[] {
-  return file.sessions[sessionID] ?? []
+  // own properties only: a prototype-hazard key ("__proto__") reads
+  // the prototype object, not undefined
+  const list = Object.hasOwn(file.sessions, sessionID) ? file.sessions[sessionID] : undefined
+  return list ?? []
 }
 
 export function openCount(items: TodoItem[]): number {
@@ -97,7 +113,8 @@ export function visibleItems(items: TodoItem[], max = MAX_ITEMS): TodoItem[] {
 
 export function headerLine(items: TodoItem[]): string {
   const open = openCount(items)
-  if (items.length > 0 && open === 0) return "todos: all done"
+  if (items.length === 0) return "todos: none"
+  if (open === 0) return "todos: all done"
   return `todos: ${open} open`
 }
 

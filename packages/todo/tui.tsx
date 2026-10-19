@@ -1,10 +1,18 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal } from "solid-js"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+  DIALOG_BUDGET,
   EMPTY,
   addItem,
   fromFile,
@@ -40,11 +48,11 @@ import {
 // the slot's session capture is shared through context.storage, the
 // host-owned store both instances read (the lastprompt pattern).
 //
-// Trust boundary (lib.ts): the file is read with an allow list that
-// falls back to empty; item text is never executed. No network, no
-// shell, no agent tools.
+// Trust boundary: see lib.ts (allow-list read, no execution). No
+// network, no shell, no agent tools.
 
-const TODO_PATH = join(homedir(), ".config", "opencode", "todos.json")
+const CONFIG_DIR = join(homedir(), ".config", "opencode")
+const TODO_PATH = join(CONFIG_DIR, "todos.json")
 const POLL_MS = 2000
 
 function readFile(): TodoFile {
@@ -57,12 +65,22 @@ function readFile(): TodoFile {
   }
 }
 
-function writeFile(file: TodoFile): void {
+function writeFile(file: TodoFile): boolean {
   try {
-    mkdirSync(join(homedir(), ".config", "opencode"), { recursive: true })
+    mkdirSync(CONFIG_DIR, { recursive: true })
+    try {
+      // a symlinked todos.json would clobber its target; refuse it
+      if (lstatSync(TODO_PATH).isSymbolicLink()) return false
+    } catch {
+      // ENOENT: the first write creates it
+    }
     writeFileSync(TODO_PATH, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 })
+    // mode applies only at creation; a pre-existing loose file stays
+    // loose without this
+    chmodSync(TODO_PATH, 0o600)
+    return true
   } catch {
-    // a failed write surfaces as a missing update, not a crash
+    return false
   }
 }
 
@@ -72,7 +90,19 @@ export default Plugin.define({
   id: "vvaldez.todo.tui",
   setup(context) {
     const [file, setFile] = createSignal<TodoFile>(readFile())
-    const timer = setInterval(() => setFile(readFile()), POLL_MS)
+
+    // Repaint only on content change: the poller re-reads the file
+    // every cycle, and a fresh object with identical content must not
+    // re-fire the signal.
+    let snapshot = JSON.stringify(readFile())
+    function refresh(): void {
+      const next = readFile()
+      const nextSnapshot = JSON.stringify(next)
+      if (nextSnapshot === snapshot) return
+      snapshot = nextSnapshot
+      setFile(next)
+    }
+    const timer = setInterval(refresh, POLL_MS)
 
     // Shared across the plugin's instances (the TUI instantiates this
     // module more than once): the slot's session capture and the
@@ -86,51 +116,77 @@ export default Plugin.define({
       return active ?? view.sid
     }
 
-    function save(mutate: (items: TodoItem[]) => TodoItem[]): void {
+    function sessionOrToast(): string | undefined {
       const sid = currentSession()
       if (sid === undefined) {
-        context.ui.toast.show({ message: "todo: no active session", variant: "warning" })
-        return
+        context.ui.toast.show({ message: "todo: start a conversation first", variant: "warning" })
       }
+      return sid
+    }
+
+    function save(mutate: (items: TodoItem[]) => TodoItem[]): void {
+      const sid = sessionOrToast()
+      if (sid === undefined) return
+      // fresh read: the poller signal may lag an action
       const current = readFile()
       const items = mutate(itemsFor(current, sid))
-      writeFile({ ...current, sessions: { ...current.sessions, [sid]: items } })
-      setFile(readFile())
+      const ok = writeFile({ ...current, sessions: { ...current.sessions, [sid]: items } })
+      if (!ok) {
+        context.ui.toast.show({ message: "todo: write failed", variant: "warning" })
+        return
+      }
+      refresh()
     }
 
     type Pick = { kind: "add" } | { kind: "item"; id: string }
 
     function openTodo(): void {
-      const sid = currentSession()
-      if (sid === undefined) {
-        context.ui.toast.show({ message: "todo: no active session", variant: "warning" })
-        return
-      }
+      const sid = sessionOrToast()
+      if (sid === undefined) return
+      // fresh read: the poller signal may lag a click
       const items = itemsFor(readFile(), sid)
       void context.ui.dialog
         .select<Pick>({
           title: headerLine(items),
+          placeholder: "this session only",
           options: [
             {
               title: "+ add a todo",
               value: { kind: "add" },
               category: "Manage",
-              description: "prompt for new item text",
+              description: "prompt for new item text, saved for this session only",
             },
             ...items.map((item) => ({
-              title: itemLine(item, 60),
-              value: { kind: "item", id: item.id } as Pick,
+              title: itemLine(item, DIALOG_BUDGET),
+              value: { kind: "item", id: item.id },
               category: item.done ? "Done" : "Open",
               description: "enter toggles done",
             })),
           ],
           actions: [
             {
+              bind: "ctrl+d",
+              title: "Toggle done",
+              selection: "required",
+              onTrigger: (value) => {
+                if (value.kind !== "item") {
+                  context.ui.toast.show({ message: "todo: select a todo first" })
+                  return
+                }
+                save((list) => toggleItem(list, value.id))
+                context.ui.dialog.clear()
+                openTodo()
+              },
+            },
+            {
               bind: "ctrl+x",
               title: "Delete",
               selection: "required",
               onTrigger: (value) => {
-                if (value.kind !== "item") return
+                if (value.kind !== "item") {
+                  context.ui.toast.show({ message: "todo: select a todo first" })
+                  return
+                }
                 save((list) => removeItem(list, value.id))
                 context.ui.dialog.clear()
                 openTodo()
@@ -141,8 +197,16 @@ export default Plugin.define({
               title: "Clear session",
               selection: "none",
               onTrigger: () => {
-                save(() => [])
-                context.ui.dialog.clear()
+                void context.ui.dialog
+                  .confirm({
+                    title: "Clear todos",
+                    message: "Clear every todo in this session?",
+                    label: { confirm: "Clear", cancel: "Keep" },
+                  })
+                  .then((ok) => {
+                    if (ok) save(() => [])
+                    else openTodo()
+                  })
               },
             },
           ],
@@ -151,7 +215,11 @@ export default Plugin.define({
           if (!value) return
           if (value.kind === "add") {
             void context.ui.dialog
-              .prompt({ title: "New todo", placeholder: "what are we working on" })
+              .prompt({
+                title: "New todo",
+                description: "saved for this session only",
+                placeholder: "what are we working on",
+              })
               .then((text) => {
                 if (!text) return
                 save((list) => addItem(list, text))

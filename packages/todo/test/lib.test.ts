@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   BUDGET,
+  DIALOG_BUDGET,
   EMPTY,
   MAX_ITEMS,
+  MAX_SESSION_ITEMS,
   addItem,
   fromFile,
   headerLine,
@@ -61,6 +63,30 @@ describe("fromFile", () => {
     expect(itemsFor(file, "ses_a")).toHaveLength(2)
     expect(openCount(itemsFor(file, "ses_a"))).toBe(1)
   })
+
+  test("prototype-hazard session keys never become own properties", () => {
+    const file = fromFile({
+      sessions: {
+        __proto__: [{ id: "a", text: "p", done: false, created: 1 }],
+        constructor: [{ id: "b", text: "c", done: false, created: 1 }],
+        ses_ok: [{ id: "c", text: "ok", done: false, created: 1 }],
+      },
+    })
+    expect(itemsFor(file, "__proto__" as string)).toHaveLength(0)
+    expect(itemsFor(file, "constructor" as string)).toHaveLength(0)
+    expect(itemsFor(file, "ses_ok")).toHaveLength(1)
+  })
+
+  test("items past the per-session cap are dropped on read", () => {
+    const many = Array.from({ length: MAX_SESSION_ITEMS + 10 }, (_, i) => ({
+      id: `i${i}`,
+      text: "t",
+      done: false,
+      created: i,
+    }))
+    const file = fromFile({ sessions: { ses_a: many } })
+    expect(itemsFor(file, "ses_a")).toHaveLength(MAX_SESSION_ITEMS)
+  })
 })
 
 describe("mutators", () => {
@@ -98,7 +124,7 @@ describe("mutators", () => {
 
 describe("rendering", () => {
   test("headerLine counts open items", () => {
-    expect(headerLine([])).toBe("todos: 0 open")
+    expect(headerLine([])).toBe("todos: none")
     expect(headerLine([item({ id: "a" }), item({ id: "b", done: true })])).toBe("todos: 1 open")
     expect(headerLine([item({ id: "a", done: true })])).toBe("todos: all done")
   })
