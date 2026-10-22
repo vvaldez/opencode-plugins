@@ -242,3 +242,17 @@ Reading: `opencode-preflight`, `opencode-sidecar`, and `opencode-watchtower` are
 - **Known panel bug**: #48519 (open) reports `session.panel` hiding the sidebar — relevant if the plugin uses panels; the two sidebar slots avoid it.
 - **API drift**: upstream is actively iterating on sidebar surfaces (#51535/#53198 reorder/hide via tui.json, #53200, #54677). Slot shapes are current as of the installed harness (2.0.27), but minor drift is possible.
 - **No upstream demand thread for vault/VPN/CI status**: unlike the footer lanes (which have #37464/#18969 to piggyback on), these lanes have no existing issue to reference — a README or upstream issue would have to make the case from scratch. That cuts both ways: no demand signal, but also no competing expectation.
+
+---
+
+## Addendum — the speed lane closed (2026-10-22)
+
+This doc underweighted the speed lane: it noted `opencode-status-line`'s streaming-speed segment but concluded vault/VPN/CI were the open lanes. A follow-up evaluation (session, 2026-10-22) found the lane has since closed for our purposes:
+
+- **`rashidrazak/opencode-status-line`** (npm `@rashidrazak/opencode-status-line`, v1.2.0, MIT, ~34★, actively maintained) now ships exactly the "last tokens/sec" readout this repo considered building as a dials widget: current (`↯`) and turn-average (`μ`) tok/s, settled figures held on screen, per-class (output vs reasoning) token calibration against exact counts, decode-time measurement that excludes tool runtime, and a `/tps` stats dialog (avg/mean/p95).
+- Upstream core has repeatedly declined in-TUI tok/s (#5374, #18968, #21132, #22344 — closed/not-planned), so the plugin is the sanctioned path.
+
+**Decision: adopt, don't build.** Installed live (`cli.json` plugins list) with a minimal config (`~/.config/opencode/opencode-status-line.json`: `segments: ["meter"]`, surface `prompt.footer.status`) so only the speed segment draws, beside dials' footer segments. No `tps` widget was added to dials; if dials ever wants a speed dial anyway, the differentiation would have to be something status-line lacks (e.g. dials-panel history views), not the footer number itself.
+
+**Verification notes for future sessions:** the plugin renders on the `app` bottom row by default (one row below OpenCode's own footer — easy to misread as "not loaded"); the meter segment stays empty with `readings: []` until a turn settles, so prove rendering with default readings before narrowing the config. Config changes require an OpenCode restart.
+
