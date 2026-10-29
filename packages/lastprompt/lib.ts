@@ -65,8 +65,10 @@ export function collapse(text: string): string {
 const PER_LINE_BUDGET = 36
 
 export function renderLine(text: string, lines: Lines): string {
+  // defense-in-depth: the clamp is fromOptions' job, but renderLine
+  // does not trust its callers (secops review, PR #7)
   const one = collapse(text)
-  const budget = lines * PER_LINE_BUDGET
+  const budget = clampLines(lines) * PER_LINE_BUDGET
   if (one.length <= budget) return one
   return one.slice(0, budget - 1) + "…"
 }

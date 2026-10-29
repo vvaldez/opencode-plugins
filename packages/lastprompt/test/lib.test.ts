@@ -82,6 +82,17 @@ describe("renderLine", () => {
     expect(renderLine(text, 1).length).toBe(36)
     expect(renderLine(text, 2).length).toBe(72)
   })
+
+  test("clamps at the new ceiling: ten lines hold 360 chars", () => {
+    const text = "x".repeat(400)
+    expect(renderLine(text, 10).length).toBe(360)
+  })
+
+  test("clamps internally, not trusting its callers", () => {
+    const text = "x".repeat(400)
+    expect(renderLine(text, 99).length).toBe(360)
+    expect(renderLine(text, -3).length).toBe(36)
+  })
 })
 
 describe("fromOptions", () => {

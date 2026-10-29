@@ -25,8 +25,8 @@ import { DEFAULTS, MAX_LINES, fromOptions, lastUserText, renderLine, type LastPr
 // switch remounts it with the new session's input.
 //
 // Trust boundary (lib.ts): options are display-only. A hostile project
-// config can at most flip the surface to off or widen the row to two
-// lines.
+// config can at most flip the surface to off or clamp the row height
+// into 1..MAX_LINES.
 
 export default Plugin.define({
   id: "vvaldez.lastprompt.tui",
