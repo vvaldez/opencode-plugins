@@ -41,17 +41,21 @@ restores defaults). Pure helpers have a unit-test target
 
 ### lastprompt — `packages/lastprompt`
 
-The session's last user prompt in the session sidebar, one or two lines
-under the built-in rows (a muted `last <truncated prompt>` line). Data
+The session's last user prompt in the session sidebar, up to ten lines
+under the built-in rows (a muted `last <truncated prompt>` block, five
+lines by default). Data
 comes from the host's own transcript store
 (`context.data.session.message.list`): no network calls, no shell, no
 files. Each session tab shows its own last prompt (the slot input
 carries the session view's sessionID), and the row repaints on submit
 without a poller. `/lastprompt` toggles the surface (sidebar | off),
-sets the line count (1 | 2), and resets. Default: on, one line, since
-installing the plugin is the opt-in. The row budget is sized for the
-host's fixed 42-column sidebar, so a one-line row stays one line. Pure
-helpers have a unit-test target (`bun test packages/lastprompt/test/`).
+cycles the line count (1 to 10, ctrl+l wraps), and resets. Default: on,
+five lines, since installing the plugin is the opt-in. The row budget
+scales with the line count (36 characters per line), sized for the
+host's fixed 42-column sidebar. Line count is also configurable via
+plugin options (`"options": { "lines": 8 }`); out-of-range values clamp
+to 1..10. Pure helpers have a unit-test target (`bun test
+packages/lastprompt/test/`).
 See [packages/lastprompt](packages/lastprompt).
 
 Prior art: upstream #28035 (sticky last prompt) closed NOT_PLANNED with

@@ -1,9 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
-import { DEFAULTS, fromOptions, lastUserText, renderLine, type LastPromptConfig } from "./lib.ts"
+import { DEFAULTS, MAX_LINES, fromOptions, lastUserText, renderLine, type LastPromptConfig } from "./lib.ts"
 
 // lastprompt: the session's last user prompt in the session sidebar,
-// one or two lines under the built-in rows.
+// up to MAX_LINES lines (five by default) under the built-in rows.
 //
 // Data: context.data.session.message.list(sessionID) is the host's own
 // transcript store (solid, event-published). A submitted prompt
@@ -86,7 +86,7 @@ export default Plugin.define({
             title: `lines: ${c.lines}`,
             value: "lines",
             category: "Display",
-            description: "1 or 2 lines, the host wraps at the sidebar width",
+            description: `1 to ${MAX_LINES} lines, the host wraps at the sidebar width`,
           },
         ],
         actions: [
@@ -107,7 +107,7 @@ export default Plugin.define({
             selection: "none",
             onTrigger: apply(
               (draft) => {
-                draft.lines = draft.lines === 1 ? 2 : 1
+                draft.lines = draft.lines >= MAX_LINES ? 1 : draft.lines + 1
               },
               () => ({ message: `lines → ${cfg().lines}` }),
             ),
