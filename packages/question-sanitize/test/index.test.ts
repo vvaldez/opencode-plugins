@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { countStr, scrub } from "../index.ts"
+import plugin, { countCarriageReturns, scrub } from "../index.ts"
 
 describe("scrub", () => {
   test("strips carriage returns from top-level strings", () => {
@@ -51,18 +51,56 @@ describe("scrub", () => {
   })
 })
 
-describe("countStr", () => {
+describe("countCarriageReturns", () => {
   test("counts carriage returns across the payload", () => {
     const input = {
       header: "a\rb\rc",
       options: [{ label: "d\r" }],
       nested: { deep: ["e\r\r"] },
     }
-    expect(countStr(input)).toBe(5)
+    expect(countCarriageReturns(input)).toBe(5)
   })
 
   test("returns zero for clean payloads and non-strings", () => {
-    expect(countStr({ header: "clean", options: [] })).toBe(0)
-    expect(countStr(42)).toBe(0)
+    expect(countCarriageReturns({ header: "clean", options: [] })).toBe(0)
+    expect(countCarriageReturns(42)).toBe(0)
+  })
+})
+
+describe("setup", () => {
+  test("registers the question hook and only scrubs the question tool", async () => {
+    let registered
+    const fakeCtx = {
+      tool: {
+        hook: async (name, cb) => {
+          expect(name).toBe("execute.before")
+          registered = cb
+        },
+      },
+    }
+    await plugin.setup(fakeCtx)
+    expect(typeof registered).toBe("function")
+
+    const questionEvent = {
+      tool: "question",
+      input: { header: "a\rb", options: [{ label: "c\rd" }] },
+    }
+    await registered(questionEvent)
+    expect(questionEvent.input.header).toBe("ab")
+    expect(questionEvent.input.options[0].label).toBe("cd")
+
+    const otherEvent = { tool: "bash", input: { command: "printf 'a\rb'" } }
+    await registered(otherEvent)
+    expect(otherEvent.input.command).toBe("printf 'a\rb'")
+  })
+
+  test("hook is a no-op on non-object input and clean payloads", async () => {
+    let registered
+    await plugin.setup({
+      tool: { hook: async (_name, cb) => { registered = cb } },
+    })
+    await registered({ tool: "question", input: "not an object" })
+    await registered({ tool: "question", input: { header: "clean" } })
+    expect(registered({ tool: "question", input: null })).toBeUndefined()
   })
 })

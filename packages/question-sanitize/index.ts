@@ -1,6 +1,7 @@
 // question-sanitize — OpenCode V2 plugin (server part).
-// Plain object export with NO imports: an import that fails to resolve makes a
-// local directory plugin silently never load.
+// Plain object export with NO imports, and package.json declares no
+// dependencies: an import that fails to resolve makes a local directory
+// plugin silently never load, so the entry is dependency-free.
 //
 // The structured `question` tool renders one word per line when its payload
 // carries literal \r (carriage-return) characters — a payload built with \r
@@ -28,18 +29,18 @@ export function scrub(value) {
   return value
 }
 
-export function countStr(value) {
+export function countCarriageReturns(value) {
   if (typeof value === "string") {
     return (value.match(/\r/g) ?? []).length
   }
   if (Array.isArray(value)) {
     let total = 0
-    for (const item of value) total += countStr(item)
+    for (const item of value) total += countCarriageReturns(item)
     return total
   }
   if (value !== null && typeof value === "object") {
     let total = 0
-    for (const key of Object.keys(value)) total += countStr(value[key])
+    for (const key of Object.keys(value)) total += countCarriageReturns(value[key])
     return total
   }
   return 0
@@ -52,7 +53,7 @@ export default {
       if (event.tool !== "question") return
       const input = event.input
       if (input === null || typeof input !== "object") return
-      const removed = countStr(input)
+      const removed = countCarriageReturns(input)
       if (removed === 0) return
       scrub(input)
       console.log(
