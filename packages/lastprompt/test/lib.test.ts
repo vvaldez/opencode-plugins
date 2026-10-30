@@ -69,6 +69,30 @@ describe("renderLine", () => {
     const long = "x".repeat(80)
     expect(renderLine(long, 2).length).toBe(72)
   })
+
+  test("scales the budget with the line count: five lines hold 180 chars", () => {
+    const text = "x".repeat(150)
+    expect(renderLine(text, 5)).toBe(text)
+    const long = "x".repeat(200)
+    expect(renderLine(long, 5).length).toBe(180)
+  })
+
+  test("matches the fixed per-line tables at the old budgets", () => {
+    const text = "x".repeat(200)
+    expect(renderLine(text, 1).length).toBe(36)
+    expect(renderLine(text, 2).length).toBe(72)
+  })
+
+  test("clamps at the new ceiling: ten lines hold 360 chars", () => {
+    const text = "x".repeat(400)
+    expect(renderLine(text, 10).length).toBe(360)
+  })
+
+  test("clamps internally, not trusting its callers", () => {
+    const text = "x".repeat(400)
+    expect(renderLine(text, 99).length).toBe(360)
+    expect(renderLine(text, -3).length).toBe(36)
+  })
 })
 
 describe("fromOptions", () => {
@@ -76,15 +100,29 @@ describe("fromOptions", () => {
     expect(fromOptions(undefined)).toEqual(DEFAULTS)
   })
 
-  test("a hostile object cannot smuggle values through", () => {
-    const cfg = fromOptions({ surface: "evil", lines: 7, onTrigger: "x" })
-    expect(cfg.surface).toBe("sidebar")
-    expect(cfg.lines).toBe(1)
+  test("defaults to five lines", () => {
+    expect(DEFAULTS.lines).toBe(5)
   })
 
-  test("known values are honored", () => {
+  test("a hostile object cannot smuggle values through", () => {
+    const cfg = fromOptions({ surface: "evil", lines: "evil", onTrigger: "x" })
+    expect(cfg.surface).toBe("sidebar")
+    expect(cfg.lines).toBe(5)
+  })
+
+  test("real line counts are honored", () => {
     expect(fromOptions({ surface: "off" }).surface).toBe("off")
     expect(fromOptions({ lines: 2 }).lines).toBe(2)
+    expect(fromOptions({ lines: 7 }).lines).toBe(7)
+    expect(fromOptions({ lines: 10 }).lines).toBe(10)
+  })
+
+  test("out-of-range and non-integer line counts clamp", () => {
+    expect(fromOptions({ lines: 0 }).lines).toBe(1)
+    expect(fromOptions({ lines: -3 }).lines).toBe(1)
+    expect(fromOptions({ lines: 99 }).lines).toBe(10)
+    expect(fromOptions({ lines: 5.5 }).lines).toBe(5)
+    expect(fromOptions({ lines: NaN }).lines).toBe(5)
   })
 
   test("storage reads validate on read like options", () => {
