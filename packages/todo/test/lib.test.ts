@@ -190,6 +190,18 @@ describe("rendering", () => {
     // two open + three done: all fit, done newest first after the open
     expect(visibleItems(mixed).map((i) => i.id)).toEqual(["o1", "o2", "o3", "d2", "d1"])
   })
+
+  test("all done and empty inputs behave correctly", () => {
+    expect(visibleItems([])).toEqual([])
+    const done = [
+      item({ id: "d1", done: true }),
+      item({ id: "d2", done: true }),
+    ]
+    // all done: newest first
+    expect(visibleItems(done).map((i) => i.id)).toEqual(["d2", "d1"])
+    const many = Array.from({ length: 10 }, (_, i) => item({ id: String(i) }))
+    expect(visibleItems(many)).toHaveLength(MAX_ITEMS)
+  })
 })
 
 describe("itemsFor", () => {

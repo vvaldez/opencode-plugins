@@ -223,6 +223,10 @@ export default Plugin.define({
                   draft.style = draft.style === "bullet" ? "checkbox" : "bullet"
                 })
                 context.ui.toast.show({ message: `glyphs → ${style()}` })
+                // re-open so the item titles pick up the new glyphs
+                // (same flow the ctrl+d/ctrl+x actions use)
+                context.ui.dialog.clear()
+                openTodo()
               },
             },
             {
