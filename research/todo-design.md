@@ -1,6 +1,7 @@
 # todo design
 
-Grilled 2026-10-18 and verified against opencode 2.0.27 (plugin SDK
+Grilled 2026-10-18 (checkbox design 2026-10-31) and verified against
+opencode 2.0.27 (plugin SDK
 types from the live `@opencode/plugin` package, upstream source, and a
 pty smoke). Companion to [lastprompt-design.md](lastprompt-design.md)
 and [../docs/adr/0001-todos-file-store.md](../docs/adr/0001-todos-file-store.md).
@@ -17,6 +18,20 @@ and [../docs/adr/0001-todos-file-store.md](../docs/adr/0001-todos-file-store.md)
 | Surface | `sidebar.content` list block | Open-count header plus up to six one-line items; `sidebar.footer` compact row deferred |
 | Publication | Build first | No ecosystem-listing artifacts in this change |
 | Find vs build | Build | aiev/opencode-todolist registers agent tools (a large trust surface) and lacks the skill path; read for ideas, not installed |
+
+## Checkbox design (2026-10-31)
+
+Grilled in two rounds (facts settled first: slot machinery, opentui
+pointer events, strikethrough support).
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Done-item visibility | Sidebar shows open items first, then done items checked below, one shared cap (MAX_ITEMS = 6) | Checkboxes only mean something if done items are visible; done items fill leftover cap space and never crowd out open ones |
+| Done-item emphasis | Strikethrough (`TextAttributes.STRIKETHROUGH`) | Reads as "crossed off"; host precedent `routes/session/message-parts.tsx:238` |
+| Glyphs | Unicode ☐/☑ everywhere (sidebar + dialog unified) | Reads as an actual checkbox; the plugin already renders unicode |
+| Style | Configurable, default "checkbox", "bullet" (•/✓) toggles back | `/todo` dialog ctrl+s and plugin options (the lastprompt pattern: `context.options` through an allow-list read into `context.storage`) |
+| Interaction | Click-to-toggle in the sidebar, independent of style; delete/clear stay in the dialog | opentui fires `onMouseUp` on any primitive (host precedent: `message-parts.tsx:80`, `group-view.tsx:152`); delete/clear have dialog confirmation flows that don't fit a bare click |
+| Click scope | The row's own session (slot sessionID), no toast on resolve | The row is mounted in that session's view; the session exists by construction |
 
 ## Verified API facts
 
@@ -45,6 +60,15 @@ and [../docs/adr/0001-todos-file-store.md](../docs/adr/0001-todos-file-store.md)
 - The host fixes the session sidebar at 42 columns
   (`SESSION_SIDEBAR_WIDTH`, upstream `packages/tui/src/ui/layout.ts`);
   the item text budget is 38 (two-character glyph prefix plus margin).
+- Slot render contents are unrestricted: the slot machinery restricts
+  inputs only (`packages/plugin/src/tui/context.ts` SlotMap), and the
+  render returns a real Solid element composed into the host tree
+  (`packages/tui/src/plugin/render.tsx` createComponent).
+- `@opentui/core` supports mouse events on any primitive (`onMouseUp`,
+  `onMouseDown`, `MouseEvent`) and `TextAttributes.STRIKETHROUGH` on
+  `<text attributes>` — host precedents `message-parts.tsx:80,238`,
+  `group-view.tsx:152`. Click only works in mouse-enabled terminals;
+  the dialog stays the non-mouse path.
 - The sidebar (`routes/session/sidebar.tsx`) renders only in the
   session route: a fresh TUI shows no sidebar until the session has
   activity. The pty smoke enters it with a one-word message first.

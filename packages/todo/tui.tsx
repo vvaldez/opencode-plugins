@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
+import { TextAttributes } from "@opentui/core"
 import { createSignal } from "solid-js"
 import {
   chmodSync,
@@ -16,12 +17,14 @@ import {
   EMPTY,
   addItem,
   fromFile,
+  fromOptions,
   headerLine,
   itemLine,
   itemsFor,
   removeItem,
   toggleItem,
   visibleItems,
+  type Style,
   type TodoFile,
   type TodoItem,
 } from "./lib.ts"
@@ -36,10 +39,24 @@ import {
 // (dials lesson, research/panel-milestone-design.md). A session with no
 // todos renders nothing, so the sidebar stays clean.
 //
+// Rows: open items first, then done items (checked, struck through)
+// filling the leftover cap space. Glyphs are ☐/☑ by default, "bullet"
+// (•/✓) as the toggle-back — settable via the /todo dialog (ctrl+s) or
+// plugin options (the lastprompt pattern: context.options through an
+// allow-list read into context.storage).
+//
+// Interaction: each row's onMouseUp toggles done in place (opentui
+// fires pointer events on any primitive; host precedent
+// message-parts.tsx). Click works only in mouse-enabled terminals —
+// the /todo dialog (enter toggles, ctrl+x deletes, ctrl+a clears)
+// stays the non-mouse path. Delete/clear keep their dialog
+// confirmation flows; a bare click never destroys.
+//
 // Writes: the /todo dialog (add via dialog.prompt, curate via select
-// actions) and the /todo-sync skill both write the same file. The
-// add path is the dialog's text prompt (arguments: true was verified
-// NOT to fire run on enter; the raw-input path dispatches elsewhere).
+// actions, click-to-toggle) and the /todo-sync skill both write the
+// same file. The add path is the dialog's text prompt (arguments: true
+// was verified NOT to fire run on enter; the raw-input path dispatches
+// elsewhere).
 //
 // Per-session scope: the slot input carries the session view's
 // sessionID, so each tab shows its own list. The plugin is
@@ -105,9 +122,13 @@ export default Plugin.define({
     const timer = setInterval(refresh, POLL_MS)
 
     // Shared across the plugin's instances (the TUI instantiates this
-    // module more than once): the slot's session capture and the
-    // keymap dialog's current-session fallback both live here.
+    // module more than once): the slot's session capture, the keymap
+    // dialog's current-session fallback, and the glyph style all live
+    // here. Style reads context.options through the allow-list read
+    // (the lastprompt pattern) and is re-validated on every read.
     const [view, updateView] = context.storage.store("view", { initial: { sid: undefined } as ViewStore })
+    const [styleStore, updateStyle] = context.storage.store("style", { initial: fromOptions(context.options) })
+    const style = (): Style => fromOptions(styleStore).style
 
     // The active root-session tab is the current session when tabs
     // have entries; otherwise the slot capture shared via storage.
@@ -138,6 +159,21 @@ export default Plugin.define({
       refresh()
     }
 
+    // Click-to-toggle from the sidebar: the slot's sessionID is
+    // authoritative (the row is mounted in that session's view), so no
+    // session resolution or toast — just a fresh read, the write, and
+    // a failed-write toast.
+    function toggleInPlace(sessionID: string, id: string): void {
+      const current = readFile()
+      const items = toggleItem(itemsFor(current, sessionID), id)
+      const ok = writeFile({ ...current, sessions: { ...current.sessions, [sessionID]: items } })
+      if (!ok) {
+        context.ui.toast.show({ message: "todo: write failed", variant: "warning" })
+        return
+      }
+      refresh()
+    }
+
     type Pick = { kind: "add" } | { kind: "item"; id: string }
 
     function openTodo(): void {
@@ -157,7 +193,7 @@ export default Plugin.define({
               description: "prompt for new item text, saved for this session only",
             },
             ...items.map((item) => ({
-              title: itemLine(item, DIALOG_BUDGET),
+              title: itemLine(item, style(), DIALOG_BUDGET),
               value: { kind: "item", id: item.id },
               category: item.done ? "Done" : "Open",
               description: "enter toggles done",
@@ -174,6 +210,21 @@ export default Plugin.define({
                   return
                 }
                 save((list) => toggleItem(list, value.id))
+                context.ui.dialog.clear()
+                openTodo()
+              },
+            },
+            {
+              bind: "ctrl+s",
+              title: "Glyphs",
+              selection: "none",
+              onTrigger: () => {
+                updateStyle((draft) => {
+                  draft.style = draft.style === "bullet" ? "checkbox" : "bullet"
+                })
+                context.ui.toast.show({ message: `glyphs → ${style()}` })
+                // re-open so the item titles pick up the new glyphs
+                // (same flow the ctrl+d/ctrl+x actions use)
                 context.ui.dialog.clear()
                 openTodo()
               },
@@ -247,11 +298,18 @@ export default Plugin.define({
             {() => {
               const items = itemsFor(file(), sessionID)
               if (items.length === 0) return null
+              const glyphs = style()
               return (
                 <box>
                   <text fg={context.theme.text.muted}>{headerLine(items)}</text>
                   {visibleItems(items).map((item) => (
-                    <text fg={context.theme.text.muted}>{itemLine(item)}</text>
+                    <text
+                      fg={context.theme.text.muted}
+                      attributes={item.done ? TextAttributes.STRIKETHROUGH : undefined}
+                      onMouseUp={() => toggleInPlace(sessionID, item.id)}
+                    >
+                      {itemLine(item, glyphs)}
+                    </text>
                   ))}
                 </box>
               )

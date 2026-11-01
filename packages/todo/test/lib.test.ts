@@ -7,6 +7,7 @@ import {
   MAX_SESSION_ITEMS,
   addItem,
   fromFile,
+  fromOptions,
   headerLine,
   itemLine,
   itemsFor,
@@ -130,13 +131,21 @@ describe("rendering", () => {
   })
 
   test("itemLine prefixes the glyph and honors the budget", () => {
-    expect(itemLine(item({ text: "short" }))).toBe("• short")
-    expect(itemLine(item({ text: "short", done: true }))).toBe("✓ short")
+    expect(itemLine(item({ text: "short" }))).toBe("☐ short")
+    expect(itemLine(item({ text: "short", done: true }))).toBe("☑ short")
     const long = item({ text: "x".repeat(50) })
     const line = itemLine(long)
-    expect(line.startsWith("• ")).toBe(true)
+    expect(line.startsWith("☐ ")).toBe(true)
     expect(line.length).toBe(2 + BUDGET)
     expect(line.endsWith("…")).toBe(true)
+  })
+
+  test("bullet style keeps the round glyphs", () => {
+    expect(itemLine(item({ text: "short" }), "bullet")).toBe("• short")
+    expect(itemLine(item({ text: "short", done: true }), "bullet")).toBe("✓ short")
+    const line = itemLine(item({ text: "x".repeat(50) }), "bullet")
+    expect(line.startsWith("• ")).toBe(true)
+    expect(line.length).toBe(2 + BUDGET)
   })
 
   test("truncate keeps the head and adds an ellipsis", () => {
@@ -144,14 +153,52 @@ describe("rendering", () => {
     expect(truncate("x".repeat(40), 38)).toHaveLength(38)
   })
 
-  test("visibleItems shows open items only, capped", () => {
+  test("visibleItems shows open items first, then done, capped", () => {
     const items = [
       item({ id: "1" }),
       item({ id: "2", done: true }),
       item({ id: "3" }),
       item({ id: "4", done: true }),
     ]
-    expect(visibleItems(items).map((i) => i.id)).toEqual(["1", "3"])
+    // open items in list order, then done items newest first
+    expect(visibleItems(items).map((i) => i.id)).toEqual(["1", "3", "4", "2"])
+  })
+
+  test("done items fill only the leftover cap space", () => {
+    const items = [
+      item({ id: "d1", done: true }),
+      item({ id: "o1" }),
+      item({ id: "d2", done: true }),
+      item({ id: "o2" }),
+      item({ id: "o3" }),
+      item({ id: "o4" }),
+      item({ id: "o5" }),
+      item({ id: "o6" }),
+    ]
+    // six open items fill the whole shared cap; the done ones drop out
+    // entirely rather than crowding an open row
+    const visible = visibleItems(items)
+    expect(visible.map((i) => i.id)).toEqual(["o1", "o2", "o3", "o4", "o5", "o6"])
+    expect(visible).toHaveLength(MAX_ITEMS)
+    const mixed = [
+      item({ id: "d1", done: true }),
+      item({ id: "o1" }),
+      item({ id: "d2", done: true }),
+      item({ id: "o2" }),
+      item({ id: "o3" }),
+    ]
+    // two open + three done: all fit, done newest first after the open
+    expect(visibleItems(mixed).map((i) => i.id)).toEqual(["o1", "o2", "o3", "d2", "d1"])
+  })
+
+  test("all done and empty inputs behave correctly", () => {
+    expect(visibleItems([])).toEqual([])
+    const done = [
+      item({ id: "d1", done: true }),
+      item({ id: "d2", done: true }),
+    ]
+    // all done: newest first
+    expect(visibleItems(done).map((i) => i.id)).toEqual(["d2", "d1"])
     const many = Array.from({ length: 10 }, (_, i) => item({ id: String(i) }))
     expect(visibleItems(many)).toHaveLength(MAX_ITEMS)
   })
@@ -162,5 +209,24 @@ describe("itemsFor", () => {
     const file: TodoFile = { sessions: { ses_a: [item({ id: "a" })] } }
     expect(itemsFor(file, "ses_a")).toHaveLength(1)
     expect(itemsFor(file, "ses_zzz")).toHaveLength(0)
+  })
+})
+
+describe("fromOptions", () => {
+  test("undefined, null, and junk fall back to the checkbox default", () => {
+    expect(fromOptions(undefined)).toEqual({ style: "checkbox" })
+    expect(fromOptions(null)).toEqual({ style: "checkbox" })
+    expect(fromOptions("garbage")).toEqual({ style: "checkbox" })
+    expect(fromOptions({ style: "evil" })).toEqual({ style: "checkbox" })
+  })
+
+  test("bullet is honored", () => {
+    expect(fromOptions({ style: "bullet" })).toEqual({ style: "bullet" })
+  })
+
+  test("unknown keys are dropped", () => {
+    const cfg = fromOptions({ style: "checkbox", extra: "dropped" })
+    expect(cfg).toEqual({ style: "checkbox" })
+    expect((cfg as Record<string, unknown>).extra).toBeUndefined()
   })
 })
