@@ -3,7 +3,9 @@
 // Trust boundary: the plugin reads one user-owned file
 // (~/.config/opencode/todos.json). A hostile or stale file shape falls
 // back to empty on read; item text is rendered as-is and never
-// executed. No network, no shell, no agent tools registered.
+// executed. Plugin options are display-only: a hostile project config
+// can at most flip the glyph style. No network, no shell, no agent
+// tools registered.
 
 export type TodoItem = {
   id: string
@@ -14,6 +16,23 @@ export type TodoItem = {
 
 export type TodoFile = {
   sessions: Record<string, TodoItem[]>
+}
+
+// Glyph style for item rows: "checkbox" (☐/☑, the default) or "bullet"
+// (•/✓, the toggle-back). Settable via the /todo dialog and plugin
+// options ("options": { "style": "bullet" }).
+export type Style = "checkbox" | "bullet"
+
+const GLYPHS: Record<Style, { open: string; done: string }> = {
+  checkbox: { open: "☐", done: "☑" },
+  bullet: { open: "•", done: "✓" },
+}
+
+// Allow-list read of plugin options: anything that is not exactly a
+// known value falls back to the default. No unknown keys pass through.
+export function fromOptions(raw: unknown): { style: Style } {
+  const o = (raw ?? {}) as Record<string, unknown>
+  return { style: o.style === "bullet" ? "bullet" : "checkbox" }
 }
 
 export const EMPTY: TodoFile = { sessions: {} }
@@ -104,11 +123,13 @@ export function removeItem(items: TodoItem[], id: string): TodoItem[] {
   return items.filter((item) => item.id !== id)
 }
 
-// The sidebar shows the session's open items, capped. Done items stay
-// reachable through the /todo dialog; the header count drops when an
-// item is toggled.
+// The sidebar shows the session's open items first, then done items
+// (checked) filling the leftover cap space, newest done first. One
+// shared cap: done items never crowd out open ones.
 export function visibleItems(items: TodoItem[], max = MAX_ITEMS): TodoItem[] {
-  return items.filter((item) => !item.done).slice(0, max)
+  const open = items.filter((item) => !item.done)
+  const done = items.filter((item) => item.done).reverse()
+  return [...open, ...done].slice(0, max)
 }
 
 export function headerLine(items: TodoItem[]): string {
@@ -118,8 +139,9 @@ export function headerLine(items: TodoItem[]): string {
   return `todos: ${open} open`
 }
 
-export function itemLine(item: TodoItem, budget = BUDGET): string {
-  const glyph = item.done ? "✓" : "•"
+export function itemLine(item: TodoItem, style: Style = "checkbox", budget = BUDGET): string {
+  const glyphs = GLYPHS[style]
+  const glyph = item.done ? glyphs.done : glyphs.open
   return `${glyph} ${truncate(item.text, budget)}`
 }
 

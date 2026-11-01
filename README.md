@@ -67,8 +67,12 @@ that #28035 pointed at.
 
 The current session's work-tracking todos in the session sidebar: a
 muted block under the built-in rows, an open-count header plus up to
-six one-line items, open items only (done items stay reachable in the
-dialog). Per-session: each session tab shows its own list, keyed by
+six one-line items — open items first (☐), then done items (☑, struck
+through) filling the leftover cap space. Checkbox glyphs by default;
+`/todo` ctrl+s (or plugin options `"style": "bullet"`) toggles back to
+the round bullet/✓ pair. Each row is click-to-toggle (mouse-enabled
+terminals); delete and clear stay in the dialog. Per-session: each
+session tab shows its own list, keyed by
 sessionID, and a session with no todos renders nothing. `/todo` opens
 the dialog (add via a text prompt, enter toggles done, ctrl+x deletes,
 ctrl+a clears the session's list). The store is one user-owned file,
